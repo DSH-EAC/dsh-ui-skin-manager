@@ -15,7 +15,7 @@
   },
   "files": ["bin", "schemas", "src"],
   "scripts": {
-    "test": "node --experimental-strip-types --test --test-concurrency=1 test/*.test.ts",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 test/*.test.ts test/runtime/*.test.ts",
     "test:schema": "node --experimental-strip-types --test --test-concurrency=1 test/schema.test.ts",
     "conformance": "node --experimental-strip-types bin/conformance-preview.mjs",
     "format:check": "node tools/check-format.mjs"

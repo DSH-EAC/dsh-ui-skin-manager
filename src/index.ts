@@ -10,3 +10,4 @@ export * from "./resolver/package-resolver.ts";
 export * from "./bindings/binding-store.ts";
 export * from "./persistence/atomic-json-store.ts";
 export * from "./diagnostics/diagnostic-store.ts";
+export * from "./runtime/index.ts";
