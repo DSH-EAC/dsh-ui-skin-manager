@@ -32,6 +32,9 @@ export function createRuntimeContext(input: {
     ledger: input.ledger,
     signal: input.signal,
     isCurrent: (generation = input.generation) => input.current() === generation && !input.signal.aborted,
-    replaceStyle: input.replaceStyle
+    replaceStyle: (key, css) => {
+      if (input.current() !== input.generation || input.signal.aborted) return;
+      input.replaceStyle(key, css);
+    }
   });
 }

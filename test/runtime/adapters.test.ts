@@ -53,6 +53,70 @@ test("mounts a typed host slot and releases style, slot, listener, and timer eff
   assert.equal(mounted.ledger.size, 0);
 });
 
+test("ignores UI writes from a context superseded by a newer generation", async () => {
+  const events: string[] = [];
+  let releaseFirst!: () => void;
+  const firstReleased = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  let firstContext: {replaceStyle(key: string, css: string): void} | undefined;
+  const host = {
+    mount: (slot: string) => ({
+      appendStyle: (key: string) => { events.push(`style:${slot}:${key}`); },
+      removeStyle: (key: string) => { events.push(`remove:${slot}:${key}`); }
+    }),
+    showError: () => {},
+    supportsCapability: () => true
+  };
+  const adapter = new HostSlotRuntimeAdapter({profile, host, timeoutMs: 100});
+  const first = adapter.mount({slot: "session", kind: "region", scope: "window", capabilities: descriptor.capabilities, generation: 1, component: async ({context}) => {
+    firstContext = context;
+    await firstReleased;
+    context.replaceStyle("late.css", "old");
+  }});
+  const second = await adapter.mount({slot: "session", kind: "region", scope: "window", capabilities: descriptor.capabilities, generation: 2, component: ({context}) => {
+    context.replaceStyle("current.css", "new");
+  }});
+  releaseFirst();
+  const firstResult = await first;
+  assert.equal(firstContext?.replaceStyle !== undefined, true);
+  assert.equal(firstResult.isCurrent(), false);
+  assert.deepEqual(events, ["style:session:current.css"]);
+  await firstResult.dispose();
+  await second.dispose();
+});
+
+test("does not let an older concurrent mount reclaim the current generation", async () => {
+  let releaseFirst!: () => void;
+  const firstReleased = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const adapter = new HostSlotRuntimeAdapter({profile, host: {mount: () => ({}), showError: () => {}, supportsCapability: () => true}, timeoutMs: 100});
+  const first = adapter.mount({slot: "session", kind: "region", scope: "window", capabilities: descriptor.capabilities, generation: 1, component: async () => {
+    await firstReleased;
+  }});
+  const second = await adapter.mount({slot: "session", kind: "region", scope: "window", capabilities: descriptor.capabilities, generation: 2, component: () => {}});
+  releaseFirst();
+  const firstResult = await first;
+  assert.equal(firstResult.isCurrent(), false);
+  assert.equal(second.isCurrent(), true);
+  await firstResult.dispose();
+  assert.equal(second.isCurrent(), true);
+  await second.dispose();
+});
+
+test("does not surface a stale mount failure after a newer generation is active", async () => {
+  const errors: Error[] = [];
+  let rejectFirst!: (error: Error) => void;
+  const firstRejected = new Promise<void>((_, reject) => { rejectFirst = reject; });
+  const adapter = new HostSlotRuntimeAdapter({profile, host: {mount: () => ({}), showError: (error) => { errors.push(error); }, supportsCapability: () => true}, timeoutMs: 100});
+  const first = adapter.mount({slot: "session", kind: "region", scope: "window", capabilities: descriptor.capabilities, generation: 1, component: async () => {
+    await firstRejected;
+  }});
+  const second = await adapter.mount({slot: "session", kind: "region", scope: "window", capabilities: descriptor.capabilities, generation: 2, component: () => {}});
+  rejectFirst(new Error("stale failure"));
+  await assert.rejects(() => first, /stale failure/);
+  assert.deepEqual(errors, []);
+  assert.equal(second.isCurrent(), true);
+  await second.dispose();
+});
+
 test("rejects a kind, scope, or undeclared capability mismatch before component execution", async () => {
   let executed = false;
   const adapter = new HostSlotRuntimeAdapter({profile, host: {mount: () => ({}), showError: () => {}, supportsCapability: () => true}, timeoutMs: 100});

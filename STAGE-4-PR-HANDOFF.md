@@ -27,8 +27,19 @@
 - [x] GREEN：`npm test`：26 passed, 0 failed。
 - [x] `npm run format:check`：passed。
 - [x] `git diff --check`：passed。
-- [x] 未运行本地 compile/build/typecheck，遵循操作要求，CI remains authority。
+- [x] 本次 verifier 修复新增 3 条并发回归测试：旧 context UI 写入被忽略、旧 mount 不得夺回 current generation、旧 mount 失败不污染新 generation error UI。
+- [x] 本次修复后的 `npm run format:check`：passed。
+- [x] 本次修复后的 `git diff --check`：passed。
+- [ ] 未运行本地 compile/build/typecheck/test，遵循 operator 明确限制，CI remains authority。
 - [ ] 未提供真实 WebView 截图/录屏；本阶段只修改 manager 测试宿主，不具备 EAC UI 启动路径。
+
+## Verifier follow-up
+
+- 修复 `replaceStyle` generation/abort guard：非 current 或 aborted context 在副作用执行前直接忽略写入。
+- mount 开始时以单调规则登记 slot 的最高 generation，旧异步 mount 完成后不会覆盖较新的 current。
+- 旧 generation 的失败仍会清理并向调用方传播，但不会触发宿主错误 UI；当前 generation 的错误 UI 行为保持不变。
+- 本地未执行测试、编译或 typecheck；上述行为由新增回归测试覆盖，最终执行需交由 CI。
+
 
 ## 配置与迁移 Configuration & Migration
 
@@ -42,5 +53,5 @@
 
 - Branch: `stage-4-runtime-adapters`
 - Base: `stage-3-manager-core`
-- Commit: pending local commit
+- Commit: `2396598`
 - Publication: no push, PR, release, or external service action

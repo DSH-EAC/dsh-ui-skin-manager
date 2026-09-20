@@ -46,6 +46,8 @@ export class HostSlotRuntimeAdapter {
     const descriptor = this.profile.slots.find((candidate) => candidate.id === request.slot);
     if (!descriptor) throw new SlotCompatibilityError("COMPATIBILITY_SLOT_UNKNOWN", request.slot);
     this.#validate(descriptor, request);
+    const previousGeneration = this.#current.get(request.slot);
+    if (previousGeneration === undefined || request.generation > previousGeneration) this.#current.set(request.slot, request.generation);
     const controller = new AbortController();
     const ledger = new EffectLedger({slot: request.slot, generation: request.generation});
     const mount = this.host.mount(request.slot);
@@ -67,7 +69,6 @@ export class HostSlotRuntimeAdapter {
     });
     try {
       await this.#bounded(request.component({context}), controller);
-      this.#current.set(request.slot, request.generation);
       return {
         state: "active",
         slot: request.slot,
@@ -82,9 +83,10 @@ export class HostSlotRuntimeAdapter {
         }
       };
     } catch (error) {
+      const wasCurrent = context.isCurrent();
       controller.abort(error);
       await ledger.dispose();
-      this.host.showError(error instanceof Error ? error : new Error(String(error)));
+      if (wasCurrent) this.host.showError(error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
   }
