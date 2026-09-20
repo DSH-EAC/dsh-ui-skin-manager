@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dsh-eac.github.io/schemas/ui-skin/v1/fault-event.schema.json",
+  "title": "DSH EAC Skin Fault Event",
+  "type": "object",
+  "required": ["timestamp", "severity", "errorCode", "message", "correlationId", "generation", "regionOrSlot", "lifecycleStage", "source", "recoverable", "recoveryAction", "bindingState"],
+  "properties": {
+    "timestamp": {"type": "string", "format": "date-time"},
+    "severity": {"enum": ["warning", "error", "fatal"]},
+    "errorCode": {"type": "string", "minLength": 1},
+    "message": {"type": "string"},
+    "correlationId": {"type": "string", "minLength": 1},
+    "generation": {"type": "integer", "minimum": 0},
+    "regionOrSlot": {"type": "string", "minLength": 1},
+    "lifecycleStage": {"type": "string", "minLength": 1},
+    "source": {"enum": ["official", "third-party"]},
+    "recoverable": {"type": "boolean"},
+    "recoveryAction": {"type": "string"},
+    "bindingState": {"type": "string"},
+    "packageId": {"type": "string"}, "packageVersion": {"type": "string"}, "packageDigest": {"type": "string"}, "control": {"type": "string"}
+  }
+}

@@ -4,7 +4,15 @@ DSH-Desktop-EAC-specific UI Skin package loader and manager.
 
 ## Status
 
-Stage 0 freezes the v6 contracts and ownership boundaries. No loader, runtime, schema implementation, CI artifact, or release is claimed yet.
+Stage 1 provides the `dsh-ui-skin-manager@1` contract/conformance preview. It includes TypeScript data models, versioned JSON Schemas, package/profile/path/integrity validation, a minimal staged per-slot lifecycle, an idempotent effect ledger, fault-isolation helpers, fixtures, and CI. It is not yet the production installer, runtime adapter, persistence core, or EAC integration.
+
+Run the dependency-free checks with a supported Node version:
+
+```text
+npm test
+npm run format:check
+npm run conformance -- test/fixtures/valid/minimal-skin.json
+```
 
 Normative decisions:
 
@@ -39,4 +47,4 @@ The former statement that manager would bundle all EAC/AIO skins as built-in exa
 - `DSH-EAC/DSH-Desktop-EAC`: host profile, stable slot mounts, Tauri/WebView/resource capabilities, build locks, and embedded recovery fallback.
 - `DSH-EAC/dsh-desktop-eac-default-skins`: official default content and reproducible release artifact.
 
-Implementation begins only after the stage 0 ADR set is reviewed and explicitly approved.
+The current preview implements the frozen contract models and conformance gates. Production package installation, persistence, runtime adapters, hot switching, EAC integration, release workflows, and AIO migration remain staged follow-up work.

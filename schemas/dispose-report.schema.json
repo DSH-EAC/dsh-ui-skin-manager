@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dsh-eac.github.io/schemas/ui-skin/v1/dispose-report.schema.json",
+  "title": "DSH EAC Skin Dispose Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generation", "slot", "attempted", "released", "remaining", "errors", "timedOut", "completedAt"],
+  "properties": {
+    "generation": {"type": "integer", "minimum": 0},
+    "slot": {"type": "string", "minLength": 1},
+    "attempted": {"type": "integer", "minimum": 0},
+    "released": {"type": "integer", "minimum": 0},
+    "remaining": {"type": "array", "items": {"type": "string"}},
+    "errors": {"type": "array", "items": {"type": "string"}},
+    "timedOut": {"type": "boolean"},
+    "completedAt": {"type": "string", "format": "date-time"}
+  }
+}

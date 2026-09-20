@@ -1,0 +1,28 @@
+{
+  "apiVersion": "dsh.eac.ui-skin/v1",
+  "kind": "SkinPackage",
+  "metadata": {"id": "system.default", "version": "2.0.0", "name": "System Default", "author": "DSH-EAC"},
+  "engines": {"manager": "^1.0.0", "hostProfile": "^0.3.0"},
+  "dependencies": [],
+  "contributions": [{
+    "id": "session.main",
+    "slot": "session",
+    "entry": "regions/session/entry.js",
+    "assets": ["regions/session/styles.css"],
+    "style": {"entry": "regions/session/styles.css", "assets": []},
+    "requires": {
+      "capabilities": ["io.github.dsh-eac.ui.notifications@^1.0.0"],
+      "slotKind": ["region"],
+      "slotScope": ["window"]
+    },
+    "lifecycle": {"mount": "mount", "health": "health", "unmount": "unmount"}
+  }],
+  "assets": [
+    {"path": "regions/session/entry.js", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    {"path": "regions/session/styles.css", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+  ],
+  "integrity": {
+    "regions/session/entry.js": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "regions/session/styles.css": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}
