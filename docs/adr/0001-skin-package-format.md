@@ -30,12 +30,12 @@ Required package coordinate:
 | `engines.hostProfile` | Exact profile/range required by contributions | host-profile owner; validated by manager |
 | `engines.dsh` | Optional explicit dsh version range for typed-slot contributions | dsh adapter owner; validated by manager |
 | `contributions` | Non-empty array; each item targets exactly one slot | package publisher; validated by manager |
-| `assets` | Complete relative asset inventory | package publisher; validated by manager |
-| `integrity` | Required SHA-256 digest for the canonical artifact; signature fields are optional | release owner; verified by manager |
+| `assets` | Complete relative asset inventory with a SHA-256 digest for every payload file | package publisher; validated by manager |
+| `integrity` | Required per-file `sha256` map; optional signature/provenance references | package publisher; verified by manager |
 
 The manager does not accept a manifest's self-declared official tag as proof of origin. The official tag is assigned by the organization catalog and is displayed separately from package identity. A package without a signature is not rejected solely for that reason; digest, path, schema, compatibility, and capability checks remain mandatory.
 
-The canonical artifact layout is a deterministic archive containing `manifest.json`, contribution entrypoints, declared assets, `LICENSE` where applicable, `NOTICE` only when an actual obligation exists, `THIRD-PARTY-NOTICES.md`, and generated provenance/checksum material for releases. Archive extraction must reject absolute paths, traversal, symlink escape, undeclared files, duplicate normalized paths, and digest mismatch.
+The canonical artifact layout is a deterministic archive containing `manifest.json`, contribution entrypoints, declared assets, `LICENSE` where applicable, `NOTICE` only when an actual obligation exists, and `THIRD-PARTY-NOTICES.md`. `manifest.json` records the digest of every other archived payload file; it cannot contain the digest of the archive that contains it. The release workflow computes the whole-archive SHA-256 after assembly and records it in the external organization catalog, EAC build lock, release checksum file, and provenance sidecar. Archive extraction must reject absolute paths, traversal, symlink escape, undeclared files, duplicate normalized paths, and per-file or whole-archive digest mismatch.
 
 ### 2. Skin and contribution model
 
@@ -68,7 +68,7 @@ A contribution cannot claim a slot owned by another package in the same committe
 Trust is layered, not binary:
 
 1. The package's origin and displayed source are metadata, not permission to bypass validation.
-2. SHA-256 integrity is mandatory for a committed artifact.
+2. SHA-256 integrity is mandatory: the manifest covers payload files, while the external catalog/build lock covers the complete artifact bytes.
 3. Optional signatures and organization catalog tags add provenance but do not replace schema, compatibility, path, or capability checks.
 4. Third-party content is explicitly marked as third-party and not covered by official functional or security guarantees.
 5. Every distributed artifact carries its actual license and attribution obligations. The default-skins repository uses MIT with `Copyright (c) 2026 zouyuxuan122`; an empty `NOTICE` is not created. If later inventory discovers a real notice obligation, release CI must generate and validate it before release.

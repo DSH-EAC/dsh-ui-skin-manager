@@ -14,7 +14,7 @@ This table is the compatibility index for `dsh-ui-skin-manager`, `DSH-Desktop-EA
 | Skin manifest | `apiVersion: dsh.eac.ui-skin/v1`, `kind: SkinPackage` | manager | skin packages/default-skins | manager | Unknown higher version rejected before activation |
 | Manifest JSON schema ID | `https://dsh-eac.github.io/schemas/ui-skin/v1/skin-package.schema.json` | manager | manager release | manager/default-skins/EAC CI | Immutable schema ID; corrected breaking semantics require `v2` |
 | Package coordinate | `<metadata.id>@<metadata.version>#sha256:<64 lowercase hex>` | manager | package publisher/release | manager/EAC build lock | ID immutable per lineage; SemVer + exact digest identify bytes |
-| Artifact digest policy | `sha256-v1` over canonical release artifact bytes | manager release owner | package release workflow | manager/EAC build | Mandatory; mismatch never forceable |
+| Artifact digest policy | `sha256-v1`: manifest covers each payload file; external catalog/build lock/provenance sidecar covers canonical archive bytes | manager release owner | package release workflow | manager/EAC build | Mandatory; mismatch never forceable; archive digest is never self-embedded |
 | Signature/provenance policy | `provenance-v1`; signature optional | manager policy; publisher supplies evidence | release workflow | manager/UI | Missing signature allowed for third-party; self-declared official status ignored |
 | Host profile | `dsh-desktop-eac-ui-skin-profile@0.3.x` | EAC | EAC | manager/default-skins | `engines.hostProfile` range must match; breaking slot/capability changes increment major/minor as SemVer requires |
 | Host capability registry | `dsh-eac-host-capabilities@1` | EAC | EAC | manager/packages | Only declared versioned capability IDs; additions are additive, semantic break increments major |
@@ -45,8 +45,8 @@ Owned by manager. Required fields:
 - `metadata.id`, `metadata.version`, `metadata.name`, `metadata.author`;
 - `engines.manager`, `engines.hostProfile`, optional `engines.dsh`;
 - non-empty `contributions`;
-- complete `assets` inventory;
-- required SHA-256 `integrity` for a committed artifact; optional signature/provenance references.
+- complete `assets` inventory with a SHA-256 digest for every payload file;
+- required per-file SHA-256 `integrity` map and optional signature/provenance references. The whole-archive SHA-256 is external because embedding it in the archive would be self-referential.
 
 ### `HostProfile` and `SlotDescriptor`
 
