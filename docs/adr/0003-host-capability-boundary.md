@@ -14,7 +14,7 @@ The host must retain a minimal recovery surface that does not depend on the mana
 
 ### 1. Independent versioned host profile
 
-The host publishes a `HostProfile` independently from package schema and application version. The initial compatible profile remains `dsh-desktop-eac-ui-skin-profile@^0.3`. A profile descriptor contains:
+The host publishes a `HostProfile` independently from package schema and application version. The initial compatible profile is `dsh-desktop-eac-ui-skin-profile@^0.3.0`. A profile descriptor contains:
 
 | Field | Rule | Owner |
 | --- | --- | --- |

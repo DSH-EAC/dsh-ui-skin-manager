@@ -59,7 +59,7 @@ A contribution cannot claim a slot owned by another package in the same committe
 
 ### 3. Host profile and context boundary
 
-`HostProfile` is host-owned and versioned independently from the package. Its minimum fields are `id`, `version`, `regions`, `slots`, `instanceKinds`, `mountContract`, `zIndexPolicy`, `capabilities`, and `fallbackSkin`. The initial profile is `dsh-desktop-eac-ui-skin-profile@^0.3`, with regions `top-sidebar`, `bottom-sidebar`, `left-sidebar`, `right-sidebar`, `session`, and `overlay`; `popup`, `dialog`, and `floating-window` are instance kinds, not binding-table regions.
+`HostProfile` is host-owned and versioned independently from the package. Its minimum fields are `id`, `version`, `regions`, `slots`, `instanceKinds`, `mountContract`, `zIndexPolicy`, `capabilities`, and `fallbackSkin`. The initial profile is `dsh-desktop-eac-ui-skin-profile@^0.3.0`, with regions `top-sidebar`, `bottom-sidebar`, `left-sidebar`, `right-sidebar`, `session`, and `overlay`; `popup`, `dialog`, and `floating-window` are instance kinds, not binding-table regions.
 
 `SkinContext` contains slot props, a restricted capability object, a structured logger, and an `AbortSignal`. It never exposes Tauri internals, private DOM objects, filesystem paths, process handles, or an unversioned host object. A manager adapter may expose public dsh `ctx.theme`, `ctx.slots`, and Cordis disposal semantics only through a versioned adapter; CSS-module hashes and upstream private DOM/classes are not ABI.
 
@@ -79,7 +79,7 @@ Trust is layered, not binary:
 
 The following axes never substitute for one another: manager API/schema, host profile/capability, package SemVer, `engines.manager`, `engines.hostProfile`, `engines.dsh`, and artifact digest/signature policy. Unknown higher manifest versions, unsupported manager/profile ranges, incompatible dsh ranges, missing required capabilities, and malformed SemVer fail before activation.
 
-The v6 initial default identity remains `system.default@2.0.0` under profile `dsh-desktop-eac-ui-skin-profile@^0.3`. A breaking contract change increments the relevant major version and requires an explicit compatibility-table update. There is no permanent `/skin/tokens.css` alias and no AIO migration in this stage.
+The v6 initial default identity remains `system.default@2.0.0` under profile `dsh-desktop-eac-ui-skin-profile@^0.3.0`. A breaking contract change increments the relevant major version and requires an explicit compatibility-table update. There is no permanent `/skin/tokens.css` alias and no AIO migration in this stage.
 
 ### 6. Rejected alternatives
 

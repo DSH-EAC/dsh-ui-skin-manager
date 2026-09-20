@@ -13,7 +13,7 @@ Normative decisions:
 - `docs/adr/0003-host-capability-boundary.md`
 - `docs/ui-skin-cross-repo-interface-versions.md`
 
-The current contract is `dsh.eac.ui-skin/v1` / `SkinPackage`, manager API `dsh-ui-skin-manager@1`, and EAC host profile `dsh-desktop-eac-ui-skin-profile@0.3.x`.
+The current contract is `dsh.eac.ui-skin/v1` / `SkinPackage`, manager API `dsh-ui-skin-manager@1`, and EAC host profile `dsh-desktop-eac-ui-skin-profile@^0.3.0`.
 
 ## Boundary
 
