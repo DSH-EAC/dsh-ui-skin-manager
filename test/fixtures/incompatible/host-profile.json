@@ -1,0 +1,16 @@
+{
+  "apiVersion": "dsh.eac.ui-skin/v1",
+  "kind": "SkinPackage",
+  "metadata": {"id": "future.skin", "version": "1.0.0", "name": "Future", "author": "fixture"},
+  "engines": {"manager": "^1.0.0", "hostProfile": "^9.0.0"},
+  "contributions": [{
+    "id": "session.main",
+    "slot": "session",
+    "entry": "entry.js",
+    "assets": [],
+    "requires": {"capabilities": [], "slotKind": ["region"], "slotScope": ["window"]},
+    "lifecycle": {"mount": "mount", "health": "health", "unmount": "unmount"}
+  }],
+  "assets": [{"path": "entry.js", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+  "integrity": {"entry.js": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+}
