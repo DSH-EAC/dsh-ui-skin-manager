@@ -14,7 +14,7 @@ The package format must support arbitrary third-party component, logic, and loca
 
 ### 1. Package identity and envelope
 
-A distributable artifact is a manager-private package with a stable coordinate and an auditable envelope. The payload is not a `.dshpack` feature-pack payload and does not share the feature-pack registry or lifecycle implicitly.
+A distributable artifact is a manager-private package with a stable coordinate and an auditable envelope. The canonical payload is not a feature-pack payload and does not share the feature-pack registry or lifecycle implicitly. For compatibility with the official EAC distribution structure, the manager also accepts an official `.dshpack` container when its catalog/build-lock metadata identifies a UI Skin payload and the extracted payload contains the declared `SkinPackage` manifest. The container is only transport and provenance; it never grants trust or changes manager validation, slot lifecycle, capability, or rollback ownership.
 
 Required package coordinate:
 
@@ -36,6 +36,8 @@ Required package coordinate:
 The manager does not accept a manifest's self-declared official tag as proof of origin. The official tag is assigned by the organization catalog and is displayed separately from package identity. A package without a signature is not rejected solely for that reason; digest, path, schema, compatibility, and capability checks remain mandatory.
 
 The canonical artifact layout is a deterministic archive containing `manifest.json`, contribution entrypoints, declared assets, `LICENSE` where applicable, `NOTICE` only when an actual obligation exists, and `THIRD-PARTY-NOTICES.md`. `manifest.json` records the digest of every other archived payload file; it cannot contain the digest of the archive that contains it. The release workflow computes the whole-archive SHA-256 after assembly and records it in the external organization catalog, EAC build lock, release checksum file, and provenance sidecar. Archive extraction must reject absolute paths, traversal, symlink escape, undeclared files, duplicate normalized paths, and per-file or whole-archive digest mismatch.
+
+The official EAC `.dshpack` compatibility layout is an outer Feature Pack archive with its required `pack.json` and a declared UI Skin payload. The payload must resolve to exactly one `SkinPackage` manifest and its relative contribution/assets root; the manager extracts and validates that inner package as if it were a canonical artifact, while EAC remains responsible for Feature Pack indexing and distribution metadata. A generic `.dshpack` containing plugins, presets, or skills without a declared SkinPackage is not a Skin input. The outer archive digest, inner payload digests, and both source/provenance records must agree before activation; a valid outer container cannot bypass any manager gate.
 
 ### 2. Skin and contribution model
 
@@ -83,7 +85,7 @@ The v6 initial default identity remains `system.default@2.0.0` under profile `ds
 
 ### 6. Rejected alternatives
 
-- `.dshpack` payload: rejected for v6 because the skin manager needs a private package contract and slot-scoped lifecycle; reusing a general feature-pack envelope would blur ownership and capability boundaries.
+- Treat every `.dshpack` as a Skin protocol: rejected because generic Feature Pack contents have different ownership and lifecycle semantics. The official `.dshpack` container is nevertheless accepted as a compatibility transport when it declares exactly one valid `SkinPackage`; the inner package remains private to the manager and all manager gates still apply.
 - Monolithic `shell-skin`: rejected because it prevents independent slot composition and conflicts with EAC ADR 0009.
 - Manifest-declared official/trusted flag: rejected because a package cannot grant itself authority.
 - Signature-only trust: rejected because signatures do not validate paths, assets, compatibility, or runtime isolation.
