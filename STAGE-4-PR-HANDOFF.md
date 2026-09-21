@@ -53,5 +53,6 @@
 
 - Branch: `stage-4-runtime-adapters`
 - Base: `stage-3-manager-core`
-- Commit: `67cf896` (`docs: refresh stage 4 CI handoff`)
+- Implementation commit: `d78acfb` (`fix: guard stale runtime slot generations`)
+- Handoff commits: `67cf896`, `4c6c0bd`
 - Publication: readable branch pushed to `origin/stage-4-runtime-adapters`; CI remains the authority for test/type/build verification; no PR or release created by this task
