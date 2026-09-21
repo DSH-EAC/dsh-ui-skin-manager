@@ -1,0 +1,16 @@
+{
+  "apiVersion": "dsh.eac.ui-skin/v1",
+  "kind": "SkinPackage",
+  "metadata": {"id": "bad.skin", "version": "1.0.0", "name": "Bad", "author": "fixture"},
+  "engines": {"manager": "^1.0.0", "hostProfile": "^0.3.0"},
+  "contributions": [{
+    "id": "bad",
+    "slot": "session",
+    "entry": "../escape.js",
+    "assets": [],
+    "requires": {"capabilities": [], "slotKind": ["region"], "slotScope": ["window"]},
+    "lifecycle": {"mount": "mount", "health": "health", "unmount": "unmount"}
+  }],
+  "assets": [{"path": "../escape.js", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+  "integrity": {"../escape.js": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+}
