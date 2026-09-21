@@ -53,5 +53,5 @@
 
 - Branch: `stage-4-runtime-adapters`
 - Base: `stage-3-manager-core`
-- Commit: `2396598`
-- Publication: no push, PR, release, or external service action
+- Commit: `d78acfb` (`fix: guard stale runtime slot generations`)
+- Publication: readable branch push is authorized; CI remains the authority for test/type/build verification; no PR or release created by this task
