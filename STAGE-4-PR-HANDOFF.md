@@ -54,5 +54,5 @@
 - Branch: `stage-4-runtime-adapters`
 - Base: `stage-3-manager-core`
 - Implementation commit: `d78acfb` (`fix: guard stale runtime slot generations`)
-- Handoff commits: `67cf896`, `4c6c0bd`
-- Publication: readable branch pushed to `origin/stage-4-runtime-adapters`; CI remains the authority for test/type/build verification; no PR or release created by this task
+- Handoff commits: `67cf896`, `4c6c0bd`, `001b8ab`
+- Publication: readable branch pushed to `origin/stage-4-runtime-adapters`; GitHub Actions CI run `35548702941` passed at `001b8ab`; no PR or release created by this task
