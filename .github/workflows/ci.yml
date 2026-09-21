@@ -23,3 +23,20 @@ jobs:
       - run: npm test
       - run: npm run format:check
       - run: npm run conformance -- test/fixtures/valid/minimal-skin.json
+
+  package:
+    name: Publish manager package artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: mkdir -p dist && npm pack --pack-destination dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-ui-skin-manager-${{ github.sha }}
+          path: dist/*.tgz
+          if-no-files-found: error
+          retention-days: 14
+
