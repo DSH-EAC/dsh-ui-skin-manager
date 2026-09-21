@@ -53,5 +53,5 @@
 
 - Branch: `stage-4-runtime-adapters`
 - Base: `stage-3-manager-core`
-- Commit: `d78acfb` (`fix: guard stale runtime slot generations`)
-- Publication: readable branch push is authorized; CI remains the authority for test/type/build verification; no PR or release created by this task
+- Commit: `67cf896` (`docs: refresh stage 4 CI handoff`)
+- Publication: readable branch pushed to `origin/stage-4-runtime-adapters`; CI remains the authority for test/type/build verification; no PR or release created by this task
