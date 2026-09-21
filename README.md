@@ -27,7 +27,7 @@ There is no monolithic shell skin. Every replaceable visual element is represent
 
 The original placeholder README intentionally blocked implementation on four open questions. Stage 0 closes them as follows:
 
-1. Skin packages use an independent EAC-private envelope, not a `.dshpack` payload.
+1. Skin packages use an independent EAC-private envelope. The official EAC `.dshpack` structure is accepted only as a compatibility container when it declares exactly one `SkinPackage` payload; generic Feature Pack contents are not skin packages, and the manager still owns inner validation and lifecycle.
 2. Package coordinates are `dsh.eac.ui-skin/v1` / `SkinPackage` plus immutable ID, SemVer, and SHA-256 digest.
 3. EAC slots map to public dsh APIs through explicit versioned adapters; CSS-module hashes, private DOM/classes, source paths, and HMR internals are not ABI.
 4. Official default source is released from the separate default-skins repository; manager releases consume artifacts and never become a second source.
