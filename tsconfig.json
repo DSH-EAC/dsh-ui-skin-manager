@@ -8,9 +8,11 @@
     "moduleResolution": "NodeNext",
     "noEmit": true,
     "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
     "strict": true,
     "target": "ES2023",
+    "types": ["node"],
     "verbatimModuleSyntax": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "tools/**/*.ts"]
 }

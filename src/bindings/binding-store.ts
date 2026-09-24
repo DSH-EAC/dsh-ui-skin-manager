@@ -1,11 +1,18 @@
-import {mkdir, unlink} from "node:fs/promises";
+import {mkdir, rename, unlink} from "node:fs/promises";
 import {join} from "node:path";
-import type {SlotBinding} from "../contracts/models.ts";
+import type {BindingGeneration, QuarantineRecord} from "../contracts/models.ts";
+import {isErrorCode, validateBindingGeneration, validateQuarantineRecords} from "../contracts/validation.ts";
 import {AtomicJsonStore} from "../persistence/atomic-json-store.ts";
 
-export interface BindingGeneration {generation: number; bindings: Record<string, SlotBinding>}
-export interface BindingReadResult {value?: BindingGeneration; backupPath?: string; diagnostic?: string}
-export interface QuarantineRecord {packageId: string; slot: string; reason: string; timestamp: string}
+export type {BindingGeneration, QuarantineRecord};
+export interface BindingReadResult {
+  value?: BindingGeneration | undefined;
+  absent?: boolean | undefined;
+  backupPath?: string | undefined;
+  diagnostic?: string | undefined;
+}
+
+const HISTORY_LIMIT = 2;
 
 export class BindingStore {
   readonly directory: string;
@@ -13,51 +20,123 @@ export class BindingStore {
   readonly pendingPath: string;
   readonly draftPath: string;
   readonly previousPath: string;
+  readonly historyPath: string;
+  readonly quarantinePath: string;
+
   constructor(directory: string) {
-    this.directory = directory; this.committedPath = join(directory, "committed.json"); this.pendingPath = join(directory, "pending.json"); this.draftPath = join(directory, "selected-draft.json"); this.previousPath = join(directory, "previous-known-good.json");
+    this.directory = directory;
+    this.committedPath = join(directory, "committed.json");
+    this.pendingPath = join(directory, "pending.json");
+    this.draftPath = join(directory, "selected-draft.json");
+    this.previousPath = join(directory, "previous-known-good.json");
+    this.historyPath = join(directory, "previous-generations.json");
+    this.quarantinePath = join(directory, "quarantine.json");
   }
-  async stage(value: BindingGeneration): Promise<void> { await new AtomicJsonStore<BindingGeneration>(this.pendingPath).write(value); }
-  async selectDraft(value: BindingGeneration): Promise<void> { await new AtomicJsonStore<BindingGeneration>(this.draftPath).write(value); }
-  async quarantine(packageId: string, slot: string, reason: string): Promise<void> {
-    const result = await new AtomicJsonStore<QuarantineRecord[]>(join(this.directory, "quarantine.json")).read([]);
-    const records = (result.value ?? []).filter((item) => !(item.packageId === packageId && item.slot === slot));
-    records.push({packageId, slot, reason, timestamp: new Date().toISOString()});
-    await new AtomicJsonStore<QuarantineRecord[]>(join(this.directory, "quarantine.json")).write(records);
+
+  async stage(value: BindingGeneration): Promise<void> {
+    await mkdir(this.directory, {recursive: true});
+    await new AtomicJsonStore<BindingGeneration>(this.pendingPath).write(value);
   }
+
+  async selectDraft(value: BindingGeneration): Promise<void> {
+    await mkdir(this.directory, {recursive: true});
+    await new AtomicJsonStore<BindingGeneration>(this.draftPath).write(value);
+  }
+
+  async discardPending(): Promise<void> {
+    await unlink(this.pendingPath).catch(() => undefined);
+  }
+
+  async quarantine(packageId: string, slot: string, reason: string): Promise<QuarantineRecord> {
+    const records = await this.#quarantineList();
+    const next = records.filter((item) => !(item.packageId === packageId && item.slot === slot));
+    const record: QuarantineRecord = {packageId, slot, reason, timestamp: new Date().toISOString()};
+    // The reason has to be a stable error code, because a host greps for it. Refusing it here is cheap; accepting
+    // one and then failing the read of the whole file would drop every other quarantine.
+    if (!isErrorCode(reason)) throw new Error(`PERSISTENCE_QUARANTINE_REASON: ${JSON.stringify(reason)} is not a stable error code`);
+    next.push(record);
+    await new AtomicJsonStore<QuarantineRecord[]>(this.quarantinePath).write(next);
+    return record;
+  }
+
+  async releaseQuarantine(packageId: string, slot: string): Promise<boolean> {
+    const records = await this.#quarantineList();
+    const next = records.filter((item) => !(item.packageId === packageId && item.slot === slot));
+    if (next.length === records.length) return false;
+    await new AtomicJsonStore<QuarantineRecord[]>(this.quarantinePath).write(next);
+    return true;
+  }
+
+  async quarantined(): Promise<QuarantineRecord[]> {
+    return this.#quarantineList();
+  }
+
   async isQuarantined(packageId: string, slot: string): Promise<QuarantineRecord | undefined> {
-    const result = await new AtomicJsonStore<QuarantineRecord[]>(join(this.directory, "quarantine.json")).read([]);
-    return (result.value ?? []).find((item) => item.packageId === packageId && item.slot === slot);
+    return (await this.#quarantineList()).find((item) => item.packageId === packageId && item.slot === slot);
   }
+
+  async #quarantineList(): Promise<QuarantineRecord[]> {
+    const result = await new AtomicJsonStore<QuarantineRecord[]>(this.quarantinePath).read([]);
+    if (result.value.length === 0) return [];
+    const validated = validateQuarantineRecords(result.value);
+    return validated.ok ? validated.value! : [];
+  }
+
   async previousGenerations(): Promise<BindingGeneration[]> {
-    const result = await new AtomicJsonStore<BindingGeneration[]>(join(this.directory, "previous-generations.json")).read([]);
-    return (result.value ?? []).sort((left, right) => right.generation - left.generation).slice(0, 2);
+    const store = new AtomicJsonStore<BindingGeneration[]>(this.historyPath);
+    const result = await store.read([]);
+    const candidates = result.value.filter((item): item is BindingGeneration => validateBindingGeneration(item).ok);
+    return candidates.sort((left, right) => right.generation - left.generation).slice(0, HISTORY_LIMIT);
   }
+
   async commit(value: BindingGeneration): Promise<void> {
     await mkdir(this.directory, {recursive: true});
     const current = await this.committed();
     if (current.value) {
       await new AtomicJsonStore<BindingGeneration>(this.previousPath).write(current.value);
       const history = await this.previousGenerations();
-      const next = [current.value, ...history.filter((item) => item.generation !== current.value!.generation)].slice(0, 2);
-      await new AtomicJsonStore<BindingGeneration[]>(join(this.directory, "previous-generations.json")).write(next);
+      const next = [current.value, ...history.filter((item) => item.generation !== current.value!.generation)].slice(0, HISTORY_LIMIT);
+      await new AtomicJsonStore<BindingGeneration[]>(this.historyPath).write(next);
     }
     await new AtomicJsonStore<BindingGeneration>(this.committedPath).write(value);
-    await unlink(this.pendingPath).catch(() => undefined);
+    await this.discardPending();
   }
-  async committed(): Promise<BindingReadResult> { return this.#read(this.committedPath); }
-  async pending(): Promise<BindingReadResult> { return this.#read(this.pendingPath); }
-  async draft(): Promise<BindingReadResult> { return this.#read(this.draftPath); }
-  async previous(): Promise<BindingReadResult> { return this.#read(this.previousPath); }
+
+  async committed(): Promise<BindingReadResult> { return this.#readGeneration(this.committedPath); }
+  async pending(): Promise<BindingReadResult> { return this.#readGeneration(this.pendingPath); }
+  async draft(): Promise<BindingReadResult> { return this.#readGeneration(this.draftPath); }
+  async previous(): Promise<BindingReadResult> { return this.#readGeneration(this.previousPath); }
+
+  // ADR 0002 section 1: a pending generation is never promoted. Recovery resumes from committed state and
+  // only falls through when committed state is missing or unparseable.
   async recover(): Promise<BindingGeneration> {
     const committed = await this.committed();
-    await unlink(this.pendingPath).catch(() => undefined);
+    await this.discardPending();
     if (committed.value) return committed.value;
     const previous = await this.previous();
-    if (previous.value) return previous.value;
+    if (previous.value) {
+      await new AtomicJsonStore<BindingGeneration>(this.committedPath).write(previous.value);
+      return previous.value;
+    }
     return {generation: 0, bindings: {}};
   }
-  async #read(path: string): Promise<BindingReadResult> {
-    const result = await new AtomicJsonStore<BindingGeneration | undefined>(path).read(undefined);
-    return {value: result.value, ...(result.backupPath ? {backupPath: result.backupPath} : {}), ...(result.diagnostic ? {diagnostic: result.diagnostic} : {})};
+
+  async #readGeneration(path: string): Promise<BindingReadResult> {
+    const read = await new AtomicJsonStore<BindingGeneration | null>(path).read(null);
+    if (read.absent) return {absent: true};
+    if (read.value === null) {
+      if (read.backupPath === undefined) return {};
+      return {backupPath: read.backupPath, diagnostic: read.diagnostic};
+    }
+    const validated = validateBindingGeneration(read.value);
+    if (validated.ok) return {value: validated.value};
+    const corrupt = await this.#markCorrupt(path, validated.issues.map((issue) => `${issue.path}: ${issue.code}`).join("; "));
+    return corrupt;
+  }
+
+  async #markCorrupt(path: string, diagnostic: string): Promise<BindingReadResult> {
+    const backupPath = `${path}.corrupt-${Date.now()}`;
+    const moved = await rename(path, backupPath).then(() => true, () => false);
+    return moved ? {backupPath, diagnostic} : {diagnostic};
   }
 }

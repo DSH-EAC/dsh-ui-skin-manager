@@ -1,0 +1,55 @@
+{
+  "id": "dsh-desktop-eac-ui-skin-profile",
+  "version": "0.3.0",
+  "regions": ["top-sidebar", "bottom-sidebar", "left-sidebar", "right-sidebar", "session", "overlay"],
+  "slots": [
+    {
+      "id": "session",
+      "region": "session",
+      "kind": "region",
+      "scope": "window",
+      "propsSchema": {"type": "object", "additionalProperties": false},
+      "mountContract": "dom-root@1",
+      "zIndexPolicy": {"min": 0, "max": 99},
+      "capabilities": ["io.github.dsh-eac.ui.notifications@1.0.0"],
+      "fallbackSkin": "system.default"
+    },
+    {
+      "id": "top-sidebar",
+      "region": "top-sidebar",
+      "kind": "region",
+      "scope": "window",
+      "propsSchema": {"type": "object", "additionalProperties": false},
+      "mountContract": "dom-root@1",
+      "zIndexPolicy": {"min": 0, "max": 99},
+      "capabilities": [],
+      "fallbackSkin": "system.default"
+    },
+    {
+      "id": "overlay",
+      "region": "overlay",
+      "kind": "overlay",
+      "scope": "document",
+      "propsSchema": {"type": "object", "additionalProperties": false},
+      "mountContract": "portal@1",
+      "zIndexPolicy": {"min": 100, "max": 999},
+      "capabilities": ["io.github.dsh-eac.ui.notifications@1.0.0"],
+      "fallbackSkin": "system.default"
+    }
+  ],
+  "instanceKinds": ["popup", "dialog", "floating-window"],
+  "zIndexPolicy": {
+    "top-sidebar": {"min": 0, "max": 99},
+    "session": {"min": 0, "max": 99},
+    "overlay": {"min": 100, "max": 999}
+  },
+  "capabilities": [
+    {"id": "io.github.dsh-eac.ui.notifications", "version": "1.0.0"},
+    {"id": "io.github.dsh-eac.host.controls", "version": "1.2.0"}
+  ],
+  "dshAdapters": [
+    {"id": "eac-dsh-adapter", "version": "1", "dsh": "0.1.5-rc.2"},
+    {"id": "eac-dsh-adapter", "version": "1", "dsh": "0.1.6-alpha.2"}
+  ],
+  "fallbackSkin": {"id": "system.default", "version": "2.0.0", "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+}

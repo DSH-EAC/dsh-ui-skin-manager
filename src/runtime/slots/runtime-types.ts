@@ -1,4 +1,5 @@
 import {EffectLedger} from "../../lifecycle/effect-ledger.ts";
+import type {DisposeReport} from "../../contracts/models.ts";
 
 export interface RuntimeSlotContext {
   readonly slot: string;
@@ -15,7 +16,7 @@ export interface RuntimeMountResult {
   readonly generation: number;
   readonly ledger: EffectLedger;
   isCurrent(generation?: number): boolean;
-  dispose(): Promise<unknown>;
+  dispose(): Promise<DisposeReport>;
 }
 
 export function createRuntimeContext(input: {
@@ -26,15 +27,16 @@ export function createRuntimeContext(input: {
   replaceStyle: (key: string, css: string) => void;
   current: () => number;
 }): RuntimeSlotContext {
-  return Object.freeze({
+  const context: RuntimeSlotContext = {
     slot: input.slot,
     generation: input.generation,
     ledger: input.ledger,
     signal: input.signal,
     isCurrent: (generation = input.generation) => input.current() === generation && !input.signal.aborted,
-    replaceStyle: (key, css) => {
+    replaceStyle: (key: string, css: string) => {
       if (input.current() !== input.generation || input.signal.aborted) return;
       input.replaceStyle(key, css);
     }
-  });
+  };
+  return Object.freeze(context);
 }

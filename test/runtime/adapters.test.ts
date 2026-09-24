@@ -160,16 +160,21 @@ test("dsh compatibility fixtures keep separate typed mappings for both supported
 test("runtime failure becomes stable error UI without cancelling another slot", async () => {
   const actions: string[] = [];
   const supervisor = new RuntimeSupervisor({
-    errorSurface: {show: (fault) => ({fault, retry: () => {actions.push("retry");}, disable: () => {actions.push("disable");}, restoreDefault: () => {actions.push("default");}, viewLogs: () => {actions.push("logs");}, copyDiagnostics: () => "redacted"})}
+    errorSurface: {show: () => ({retry: () => {actions.push("retry");}, disable: () => {actions.push("disable");}, restoreDefault: () => {actions.push("default");}, viewLogs: () => {actions.push("logs");}, copyDiagnostics: () => "redacted", viewPackageSource: () => "third-party"})}
   });
   const result = await supervisor.run({slot: "session", generation: 4, packageId: "third.party.skin", packageVersion: "1.0.0", packageDigest: `sha256:${"a".repeat(64)}`, run: () => {throw new Error("secret /home/user/session");}});
   assert.equal(result.ok, false);
-  assert.equal(result.errorUi?.copyDiagnostics(), "redacted");
-  result.errorUi?.retry();
-  result.errorUi?.disable();
-  result.errorUi?.restoreDefault();
-  result.errorUi?.viewLogs();
+  if (result.ok) assert.fail("the task was expected to fail");
+  assert.equal(result.errorUi.copyDiagnostics(), "redacted");
+  result.errorUi.retry();
+  result.errorUi.disable();
+  result.errorUi.restoreDefault();
+  result.errorUi.viewLogs();
   assert.deepEqual(actions, ["retry", "disable", "default", "logs"]);
+  assert.equal(result.errorUi.viewPackageSource(), "third-party");
+  assert.equal(result.fault.message.includes("/home/user"), false);
+  assert.equal(result.error.message, "secret /home/user/session");
+  assert.equal(result.fault.message, "secret <redacted-path>");
   const fault = supervisor.diagnostics.export()[0];
   assert.equal(fault?.errorCode, "RUNTIME_COMPONENT_FAILED");
   assert.equal(fault?.message.includes("/home/user"), false);

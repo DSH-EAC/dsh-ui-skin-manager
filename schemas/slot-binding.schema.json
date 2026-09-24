@@ -7,18 +7,21 @@
   "required": ["slot", "package", "contribution", "generation", "state"],
   "properties": {
     "slot": {"type": "string", "minLength": 1},
-    "package": {
+    "package": {"$ref": "#/$defs/packageCoordinate"},
+    "contribution": {"type": "string", "minLength": 1},
+    "generation": {"type": "integer", "minimum": 0},
+    "state": {"enum": ["staged", "active", "failed", "inactive"]}
+  },
+  "$defs": {
+    "packageCoordinate": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "version", "digest"],
       "properties": {
-        "id": {"type": "string"},
-        "version": {"type": "string"},
-        "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+        "id": {"$ref": "./skin-package.schema.json#/$defs/identifier"},
+        "version": {"$ref": "./skin-package.schema.json#/$defs/semver"},
+        "digest": {"$ref": "./skin-package.schema.json#/$defs/digest"}
       }
-    },
-    "contribution": {"type": "string", "minLength": 1},
-    "generation": {"type": "integer", "minimum": 0},
-    "state": {"enum": ["staged", "active", "failed", "inactive"]}
+    }
   }
 }

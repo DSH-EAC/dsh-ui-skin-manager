@@ -68,6 +68,31 @@ export interface SlotBinding {
   state: "staged" | "active" | "failed" | "inactive";
 }
 
+export interface BindingGeneration {
+  generation: number;
+  bindings: Record<string, SlotBinding>;
+}
+
+export interface QuarantineRecord {
+  packageId: string;
+  slot: string;
+  reason: string;
+  timestamp: string;
+}
+
+export interface InstalledPackage {
+  manifest: SkinManifest;
+  versionPath: string;
+  digest: string;
+  source: "local" | "embedded" | "remote";
+  origin: string;
+  archiveDigest?: string | undefined;
+  container?: {id: string; version: string; root: string} | undefined;
+  signature?: {algorithm: string; value: string; signer?: string | undefined} | undefined;
+  refCount?: number | undefined;
+  official?: boolean | undefined;
+}
+
 export interface FaultEvent {
   timestamp: string;
   severity: "warning" | "error" | "fatal";
@@ -85,6 +110,7 @@ export interface FaultEvent {
   packageVersion?: string;
   packageDigest?: string;
   control?: string;
+  detail?: Record<string, unknown>;
 }
 
 export interface DisposeReport {

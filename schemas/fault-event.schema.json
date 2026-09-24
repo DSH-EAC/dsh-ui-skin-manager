@@ -7,7 +7,7 @@
   "properties": {
     "timestamp": {"type": "string", "format": "date-time"},
     "severity": {"enum": ["warning", "error", "fatal"]},
-    "errorCode": {"type": "string", "minLength": 1},
+    "errorCode": {"$ref": "./skin-package.schema.json#/$defs/errorCode"},
     "message": {"type": "string"},
     "correlationId": {"type": "string", "minLength": 1},
     "generation": {"type": "integer", "minimum": 0},
@@ -15,8 +15,17 @@
     "lifecycleStage": {"type": "string", "minLength": 1},
     "source": {"enum": ["official", "third-party"]},
     "recoverable": {"type": "boolean"},
-    "recoveryAction": {"type": "string"},
-    "bindingState": {"type": "string"},
-    "packageId": {"type": "string"}, "packageVersion": {"type": "string"}, "packageDigest": {"type": "string"}, "control": {"type": "string"}
+    "recoveryAction": {"type": "string", "minLength": 1},
+    "bindingState": {"type": "string", "minLength": 1},
+    "packageId": {"$ref": "./skin-package.schema.json#/$defs/identifier"},
+    "packageVersion": {"$ref": "./skin-package.schema.json#/$defs/semver"},
+    "packageDigest": {"$ref": "./skin-package.schema.json#/$defs/digest"},
+    "control": {"type": "string", "minLength": 1},
+    "detail": {"type": "object"}
+  },
+  "dependentRequired": {
+    "packageId": ["packageVersion", "packageDigest"],
+    "packageVersion": ["packageId", "packageDigest"],
+    "packageDigest": ["packageId", "packageVersion"]
   }
 }
