@@ -33,7 +33,9 @@ jobs:
       - run: npm test
       - run: npm run format:check
       - run: npm run example
-      - run: npm run conformance -- test/fixtures/valid/minimal-skin.json test/fixtures/valid/host-profile.json --profile test/fixtures/valid/host-profile.json
+      # The profile is the thing being checked *against*, not a target: `check` validates every positional
+      # argument as a SkinPackage, so naming host-profile.json here asks it to fail and it correctly does.
+      - run: npm run conformance -- test/fixtures/valid/minimal-skin.json --profile test/fixtures/valid/host-profile.json
 
   package:
     name: Publish manager package artifact

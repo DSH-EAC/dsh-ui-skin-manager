@@ -103,6 +103,10 @@ consumer; it is the difference between the placeholder repository and a usable p
 - CI: the package job `mv`'d the tarball out of the directory it then uploaded, so the artifact glob matched
   nothing; it copies instead. The conformance job now runs `npm run build` explicitly rather than inheriting it
   from `npm ci`'s `prepare`, because its `example` and `conformance` steps read `dist/` directly.
+- CI: the conformance step named `test/fixtures/valid/host-profile.json` as a second *target* as well as passing
+  it through `--profile`. `check` validates every positional argument as a `SkinPackage`, so the step asked the
+  CLI to reject the host profile and it correctly did - exit `1` with seven `MANIFEST_*` issues, on every run
+  since the step was added. Only the earlier failures hid it; making `npm test` pass is what surfaced this.
 - `loadArtifact()` read an archive into a `Uint8Array` before anything asked how big it was: the 512 MiB ceiling
   lives in `readZip`, which only runs once the bytes are already in memory, so a hostile `skin.zip` of any size
   ended the host process before it could be refused. The `lstat` two lines above already reported the size, and
