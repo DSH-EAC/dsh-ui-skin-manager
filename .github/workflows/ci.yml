@@ -29,6 +29,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run format:check
+      - run: npm run example
       - run: npm run conformance -- test/fixtures/valid/minimal-skin.json test/fixtures/valid/host-profile.json --profile test/fixtures/valid/host-profile.json
 
   package:
@@ -89,6 +90,7 @@ jobs:
             echo "an invalid manifest must exit non-zero" >&2
             exit 1
           fi
+          node node_modules/@dsh-eac/ui-skin-manager/examples/switch-slot.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: dsh-ui-skin-manager-${{ github.sha }}

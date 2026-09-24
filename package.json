@@ -34,6 +34,7 @@
   "files": [
     "bin",
     "dist",
+    "examples",
     "schemas",
     "src"
   ],
@@ -44,8 +45,9 @@
     "test": "node --experimental-strip-types --test --test-concurrency=1 --test-timeout=30000 \"test/**/*.test.ts\"",
     "test:schema": "node --experimental-strip-types --test --test-timeout=30000 test/schema.test.ts",
     "conformance": "node bin/dsh-skin.mjs check",
+    "example": "node examples/switch-slot.mjs",
     "format:check": "node tools/check-format.mjs",
-    "verify": "npm run typecheck && npm test && npm run format:check && npm run build && npm run conformance -- test/fixtures/valid/minimal-skin.json"
+    "verify": "npm run typecheck && npm test && npm run format:check && npm run build && npm run example && npm run conformance -- test/fixtures/valid/minimal-skin.json"
   },
   "devDependencies": {
     "@types/node": "^24.13.6",
