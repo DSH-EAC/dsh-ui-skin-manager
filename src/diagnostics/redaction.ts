@@ -1,9 +1,14 @@
 import {createHash} from "node:crypto";
 
-const CREDENTIAL = /\b(token|password|secret|authorization|api[-_]?key|cookie)\b\s*[=:]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi;
+// The optional scheme group matters: without it `Authorization: Bearer eyJhbGci...` redacts the word "Bearer"
+// and leaves the credential itself in the line.
+const CREDENTIAL = /\b(token|password|secret|authorization|api[-_]?key|cookie)\b\s*[=:]\s*(?:(?:bearer|basic|digest)\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi;
 const BEARER = /\b(bearer\s+)[A-Za-z0-9._~+/-]{8,}=*/gi;
 const WINDOWS_PATH = /(?:[A-Za-z]:[\\/]|\\\\)[^\s"',;]*/g;
-const POSIX_PATH = /\/(?:[^\s"',\\/]+\/)+[^\s"',\\/]*/g;
+// Only a slash-led token that does not continue a word is a filesystem path. Without that boundary
+// `regions/session/entry.js`, the single most useful thing a skin fault can say, would be redacted along with
+// `/home/operator/.dsh`, and every separator a message can use would have to be enumerated instead.
+const POSIX_PATH = /(?<![A-Za-z0-9._~%-])\/(?:[^\s"',\\/]+\/)+[^\s"',\\/]*/g;
 const HOME_PATH = /~\/[^\s"',]*/g;
 
 // ADR 0002 section 6: filesystem roots, home directories and credentials never reach persisted diagnostics,

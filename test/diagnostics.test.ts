@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {DiagnosticStore, validateFaultEvent, validateQuarantineRecords} from "../src/index.ts";
+import {DiagnosticStore, redact, redactDetail, validateFaultEvent, validateQuarantineRecords} from "../src/index.ts";
 
 const fault = (overrides: Record<string, unknown> = {}) => ({
   timestamp: "2026-09-24T00:00:00.000Z",
@@ -69,4 +69,46 @@ test("quarantine history must itself satisfy the error-code contract", () => {
   assert.equal(validateQuarantineRecords([{packageId: "a.b", slot: "session", reason: "HEALTH_FAILED", timestamp: "2026-09-24T00:00:00.000Z"}]).ok, true);
   assert.ok(validateQuarantineRecords([{packageId: "a.b", slot: "session", reason: "because", timestamp: "2026-09-24T00:00:00.000Z"}]).issues.some((issue) => issue.code === "PERSISTENCE_QUARANTINE_REASON"));
   assert.ok(validateQuarantineRecords({}).issues.some((issue) => issue.code === "PERSISTENCE_QUARANTINE"));
+});
+
+test("redact removes credentials and filesystem roots", () => {
+  const BS = String.fromCharCode(92);
+  const cases: Array<[string, string[]]> = [
+    [`C:${BS}Users${BS}operator${BS}skins${BS}theme.css is locked`, ["operator", "skins"]],
+    [`the mount landed on ${BS}${BS}fileserver${BS}orders${BS}theme.css`, ["fileserver", "orders"]],
+    ["mounted /home/operator/.dsh/skins/overlay", ["/home/operator", "operator"]],
+    ["the store {\"root\":\"/srv/dsh/skins/overlay\"} failed, then /var/log/dsh", ["/srv/dsh", "/var/log"]],
+    ["home is ~/.dsh/skins", [".dsh"]],
+    ["opening file:///home/operator/.dsh/skins/theme.css failed", ["/home/operator"]],
+    ["token=s3cr3tvalue with Authorization: Bearer abc.def.ghi-jkl and cookie: sid=0123456789ab", ["s3cr3tvalue", "abc.def.ghi-jkl", "0123456789ab"]]
+  ];
+  for (const [message, secrets] of cases) {
+    const output = redact(message);
+    for (const secret of secrets) assert.ok(!output.includes(secret), `${JSON.stringify(message)} leaked ${JSON.stringify(secret)} as ${JSON.stringify(output)}`);
+    assert.ok(output.includes("<redacted"), `${JSON.stringify(message)} was not redacted at all`);
+  }
+});
+
+test("redact keeps the diagnostic signal a skin author needs", () => {
+  const kept = [
+    "failed to read regions/session/entry.js: ENOENT",
+    "opening ./regions/session/theme.css or a-b/c/theme.css failed",
+    "asset regions/session/theme.css is 0 bytes at 2026-09-24 in range ^0.3.0",
+    "contribution overlay.main needs io.github.dsh-eac.ui.notifications@1.0.0",
+    "checking 100%coverage.css against theme-.css"
+  ];
+  for (const message of kept) assert.equal(redact(message), message);
+});
+
+test("redactDetail keeps contract coordinates and hashes everything else", () => {
+  const home = `/home/operator/${"x".repeat(64)}`;
+  const detail = redactDetail({slot: "overlay", contribution: "overlay.main", generation: 7, packageId: "third.party.skin", home, retry: 3, nested: {path: home}});
+  assert.equal(detail.slot, "overlay");
+  assert.equal(detail.contribution, "overlay.main");
+  assert.equal(detail.generation, 7);
+  assert.equal(detail.packageId, "third.party.skin");
+  assert.match(String(detail.retry), /^#[0-9a-f]{16}$/, "a field the contract does not name is opaque, even a number");
+  assert.match(String(detail.home), /^#[0-9a-f]{16}$/);
+  assert.match(String(detail.nested), /^#[0-9a-f]{16}$/, "a nested object is hashed rather than walked");
+  assert.equal(detail.home, redactDetail({home}).home, "the hash is stable across runs");
 });
