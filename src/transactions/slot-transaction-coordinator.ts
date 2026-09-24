@@ -169,10 +169,11 @@ export class SlotTransactionCoordinator {
   }
 
   // Resolves once the grace period has run out, which is how an abort that was ignored becomes reportable.
+  // The timer must stay referenced: this is a wait the caller is blocked on, and an unref'd one lets the event
+  // loop empty out around a hook that never settles, which ends the process instead of reporting the abandonment.
   static #graceElapsed(ms: number): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(true), ms);
-      timer.unref?.();
+      setTimeout(() => resolve(true), ms);
     });
   }
 }
