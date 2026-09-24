@@ -68,6 +68,18 @@ export interface SlotBinding {
   state: "staged" | "active" | "failed" | "inactive";
 }
 
+export interface BindingGeneration {
+  generation: number;
+  bindings: Record<string, SlotBinding>;
+}
+
+export interface QuarantineRecord {
+  packageId: string;
+  slot: string;
+  reason: string;
+  timestamp: string;
+}
+
 export interface FaultEvent {
   timestamp: string;
   severity: "warning" | "error" | "fatal";
@@ -85,6 +97,7 @@ export interface FaultEvent {
   packageVersion?: string;
   packageDigest?: string;
   control?: string;
+  detail?: Record<string, unknown>;
 }
 
 export interface DisposeReport {

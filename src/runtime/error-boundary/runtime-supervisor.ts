@@ -1,14 +1,18 @@
 import {DiagnosticStore} from "../../diagnostics/diagnostic-store.ts";
+import {redact} from "../../diagnostics/redaction.ts";
 import type {FaultEvent} from "../../contracts/models.ts";
 
+export interface ErrorSurfaceActions {
+  retry(): void;
+  disable(): void;
+  restoreDefault(): void;
+  viewLogs(): void;
+  copyDiagnostics(): string;
+  viewPackageSource(): string;
+}
+
 export interface RuntimeErrorSurface {
-  show(fault: FaultEvent): {
-    retry(): void;
-    disable(): void;
-    restoreDefault(): void;
-    viewLogs(): void;
-    copyDiagnostics(): string;
-  };
+  show(fault: FaultEvent): ErrorSurfaceActions;
 }
 
 export interface RuntimeTask {
@@ -18,30 +22,31 @@ export interface RuntimeTask {
   packageVersion: string;
   packageDigest: string;
   source?: "official" | "third-party";
+  control?: string;
   run(): void | Promise<void>;
 }
 
 export class RuntimeSupervisor {
-  readonly diagnostics = new DiagnosticStore();
+  readonly diagnostics: DiagnosticStore;
   readonly errorSurface: RuntimeErrorSurface;
 
-  constructor(options: {errorSurface: RuntimeErrorSurface}) {
+  constructor(options: {errorSurface: RuntimeErrorSurface; diagnostics?: DiagnosticStore}) {
     this.errorSurface = options.errorSurface;
+    this.diagnostics = options.diagnostics ?? new DiagnosticStore();
   }
 
-  async run(task: RuntimeTask): Promise<{ok: true} | {ok: false; error: Error; errorUi: ReturnType<RuntimeErrorSurface["show"]>}> {
+  async run(task: RuntimeTask): Promise<{ok: true} | {ok: false; error: Error; errorUi: ErrorSurfaceActions; fault: FaultEvent}> {
     try {
       await task.run();
       return {ok: true};
     } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause));
-      const correlationId = `runtime-${task.slot}-${task.generation}`;
       const fault: FaultEvent = {
         timestamp: new Date().toISOString(),
         severity: "error",
         errorCode: "RUNTIME_COMPONENT_FAILED",
         message: redact(error.message),
-        correlationId,
+        correlationId: `runtime-${task.slot}-${task.generation}`,
         generation: task.generation,
         regionOrSlot: task.slot,
         lifecycleStage: "runtime",
@@ -51,16 +56,11 @@ export class RuntimeSupervisor {
         bindingState: "failed",
         packageId: task.packageId,
         packageVersion: task.packageVersion,
-        packageDigest: task.packageDigest
+        packageDigest: task.packageDigest,
+        ...(task.control === undefined ? {} : {control: task.control})
       };
       this.diagnostics.record(fault);
-      return {ok: false, error, errorUi: this.errorSurface.show(fault)};
+      return {ok: false, error, errorUi: this.errorSurface.show(fault), fault};
     }
   }
-}
-
-function redact(message: string): string {
-  return message
-    .replace(/(?:[A-Za-z]:)?(?:\\|\/)(?:[^\\/\s]+[\\/])*[^\\/\s]*/g, "<redacted-path>")
-    .replace(/\b(?:token|password|secret|authorization)\s*[=:]\s*[^\s,;]+/gi, "$1=<redacted>");
 }

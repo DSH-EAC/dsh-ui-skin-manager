@@ -25,6 +25,9 @@ export interface SlotTransactionResult {
   state: "active";
   binding: SlotBinding;
   generation: number;
+  // Cleanup that ran after the commit point. ADR 0002 section 4: a residue here is a disposal failure the
+  // caller must quarantine, but it can never un-publish the generation that is already persisted.
+  disposeErrors: string[];
 }
 
 export class TransactionStageError extends Error {
@@ -59,7 +62,7 @@ export class SlotTransactionCoordinator {
   switch(request: SlotTransactionRequest): Promise<SlotTransactionResult> {
     const prior = this.#queues.get(request.slot) ?? Promise.resolve();
     const run = prior.then(() => this.#switch(request));
-    this.#queues.set(request.slot, run.catch(() => undefined));
+    this.#queues.set(request.slot, run.then(() => undefined, () => undefined));
     return run;
   }
 
@@ -69,37 +72,49 @@ export class SlotTransactionCoordinator {
       throw new TransactionStageError("generation", new Error(`generation ${request.binding.generation} is not newer than ${current.generation}`));
     }
     const previous = current ? {binding: structuredClone(current), dispose: request.previous?.dispose} : undefined;
-    const staged: SlotTransactionContext[] = [...request.contexts];
+    const participants = [...request.contexts];
+    let committed: SlotBinding;
     try {
       for (const stage of ["prepare", "preload", "activate", "health"] as const) {
-        await Promise.all(request.contexts.map(async (context) => {
-          await this.#run(stage, context[stage], context.id);
-          if (stage === "activate" && !staged.includes(context)) staged.push(context);
-        }));
+        await Promise.all(participants.map((context) => this.#run(stage, context.id, () => context[stage]?.(request.binding))));
       }
-      await Promise.all(request.contexts.map((context) => this.#run("commit", context.commit, context.id)));
-      const committed = structuredClone({...request.binding, state: "active"});
-      await this.#run("commit-persistence", request.persist, request.slot, committed);
-      this.#active.set(request.slot, committed);
-      await Promise.all(request.contexts.map((context) => this.#run("dispose-old", context.disposeOld, context.id)));
-      await previous?.dispose?.();
-      return {state: "active", binding: structuredClone(this.#active.get(request.slot)!), generation: request.binding.generation};
+      await Promise.all(participants.map((context) => this.#run("commit", context.id, () => context.commit?.(request.binding))));
+      committed = structuredClone({...request.binding, state: "active"} satisfies SlotBinding);
+      await this.#run("commit-persistence", request.slot, () => request.persist?.(committed));
     } catch (cause) {
-      await Promise.all([...staged].reverse().map((context) => this.#run("rollback", context.rollback, context.id).catch(() => undefined)));
+      for (const context of [...participants].reverse()) {
+        await this.#run("rollback", context.id, () => context.rollback?.(request.binding)).then(() => undefined, () => undefined);
+      }
       if (previous) this.#active.set(request.slot, previous.binding);
       else this.#active.delete(request.slot);
       throw cause;
     }
+    this.#active.set(request.slot, committed);
+    const disposeErrors: string[] = [];
+    const cleanup: Array<{id: string; invoke: () => void | Promise<void>}> = participants
+      .filter((context) => context.disposeOld !== undefined)
+      .map((context) => ({id: context.id, invoke: () => context.disposeOld!(committed)}));
+    if (previous && request.previous?.dispose) {
+      const dispose = request.previous.dispose;
+      cleanup.push({id: "previous", invoke: () => dispose(previous.binding)});
+    }
+    for (const step of cleanup) {
+      try {
+        await this.#run("dispose-old", step.id, step.invoke);
+      } catch (error) {
+        disposeErrors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    return {state: "active", binding: structuredClone(committed), generation: committed.generation, disposeErrors};
   }
 
-  async #run(stage: string, hook: TransactionHook | undefined, context: string, ...args: [SlotBinding?]): Promise<void> {
-    if (!hook) return;
+  async #run(stage: string, context: string, invoke: () => void | Promise<void>): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
+    const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new TransactionStageError(stage, new Error(`timed out after ${this.timeoutMs}ms`), context)), this.timeoutMs);
     });
     try {
-      await Promise.race([Promise.resolve().then(() => hook(...args)), timeout]);
+      await Promise.race([Promise.resolve().then(invoke), deadline]);
     } catch (cause) {
       if (cause instanceof TransactionStageError) throw cause;
       throw new TransactionStageError(stage, cause, context);

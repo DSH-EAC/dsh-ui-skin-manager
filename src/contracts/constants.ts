@@ -9,3 +9,18 @@ export const ERROR_CATEGORIES = [
   "CAPABILITY", "PREPARE", "ACTIVATE", "HEALTH", "TIMEOUT",
   "RUNTIME", "DISPOSE", "PERSISTENCE", "RECOVERY"
 ] as const;
+
+// ADR 0002 section 4: a package may request a shorter deadline but cannot raise these maxima.
+export const LIFECYCLE_DEADLINES = {
+  prepareAndPreload: 10_000,
+  activate: 10_000,
+  health: 10_000,
+  deactivateAndDispose: 10_000,
+  forceEnableConfirmation: 30_000
+} as const;
+
+// ADR 0002 section 6: rotation and retention are fixed for contract v1.
+export const LOG_POLICY = {
+  maxFileBytes: 16 * 1024 * 1024,
+  retentionDays: 30
+} as const;

@@ -3,9 +3,10 @@ import {readFile} from "node:fs/promises";
 import test from "node:test";
 
 import {validateSkinManifest} from "../src/index.ts";
+import type {HostProfile} from "../src/index.ts";
 
 const load = async (name: string): Promise<unknown> => JSON.parse(await readFile(new URL(`./fixtures/${name}`, import.meta.url), "utf8"));
-const profile = {
+const profile: HostProfile = {
   id: "dsh-desktop-eac-ui-skin-profile", version: "0.3.2", regions: ["session"],
   slots: [{id: "session", region: "session", kind: "region", scope: "window", propsSchema: {}, mountContract: "dom-root@1", zIndexPolicy: {min: 0, max: 1}, capabilities: [], fallbackSkin: "system.default"}],
   instanceKinds: ["popup", "dialog", "floating-window"], zIndexPolicy: {session: {min: 0, max: 1}}, capabilities: [], dshAdapters: [],
@@ -18,6 +19,19 @@ test("rejects an incompatible host profile before activation", async () => {
   assert.ok(result.issues.some((issue) => issue.code === "COMPATIBILITY_HOST_PROFILE"));
 });
 
+test("a breaking host profile bump outside the caret-zero window is rejected", async () => {
+  const manifest = await load("valid/minimal-skin.json") as Record<string, any>;
+  assert.equal(manifest.engines.hostProfile, "^0.3.0");
+  for (const version of ["0.4.0", "0.10.0", "1.0.0"]) {
+    assert.ok(
+      validateSkinManifest(manifest, {profile: {...profile, version}}).issues.some((issue) => issue.code === "COMPATIBILITY_HOST_PROFILE"),
+      `profile ${version} must not satisfy ^0.3.0`
+    );
+  }
+  const satisfied: HostProfile = {...profile, version: "0.3.9", capabilities: [{id: "io.github.dsh-eac.ui.notifications", version: "1.0.0"}]};
+  assert.deepEqual(validateSkinManifest(manifest, {profile: satisfied}).issues, []);
+});
+
 test("rejects an unknown slot and missing capability before activation", async () => {
   const manifest = await load("valid/minimal-skin.json") as Record<string, any>;
   const unknown = structuredClone(manifest);
@@ -26,4 +40,10 @@ test("rejects an unknown slot and missing capability before activation", async (
   missing.contributions[0].requires.capabilities = ["io.example.missing@^1.0.0"];
   assert.ok(validateSkinManifest(unknown, {profile}).issues.some((issue) => issue.code === "COMPATIBILITY_SLOT"));
   assert.ok(validateSkinManifest(missing, {profile}).issues.some((issue) => issue.code === "COMPATIBILITY_CAPABILITY"));
+});
+
+test("a malformed host profile is reported instead of crashing the manifest check", async () => {
+  const manifest = await load("valid/minimal-skin.json") as Record<string, any>;
+  assert.doesNotThrow(() => validateSkinManifest(manifest, {profile: {} as HostProfile}));
+  assert.ok(validateSkinManifest(manifest, {profile: {} as HostProfile}).issues.some((issue) => issue.code === "COMPATIBILITY_HOST_PROFILE"));
 });

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {mkdtemp, readFile} from "node:fs/promises";
+import {mkdtemp, readFile, readdir, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import test from "node:test";
@@ -19,6 +19,33 @@ const manifest = (id = "third.party.skin", version = "1.0.0"): SkinManifest => (
   assets: [{path: "entry.js", sha256: "a".repeat(64)}], integrity: {"entry.js": "a".repeat(64)}
 });
 const profile = {id: "dsh-desktop-eac-ui-skin-profile", version: "0.3.0", regions: ["session"], slots: [{id: "session", region: "session", kind: "region", scope: "window", propsSchema: {}, mountContract: "dom-root@1", zIndexPolicy: {min: 0, max: 99}, capabilities: [], fallbackSkin: "system.default"}], instanceKinds: [], zIndexPolicy: {session: {min: 0, max: 99}}, capabilities: [], dshAdapters: [], fallbackSkin: {id: "system.default", version: "2.0.0", digest: digest("d")}} satisfies HostProfile;
+
+test("a missing state file is absent, not corrupt evidence", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skin-manager-"));
+  const store = new BindingStore(dir);
+  const committed = await store.committed();
+  assert.equal(committed.value, undefined);
+  assert.equal(committed.absent, true);
+  assert.equal(committed.diagnostic, undefined);
+  assert.equal(committed.backupPath, undefined);
+  assert.deepEqual((await readdir(dir)).filter((name) => name.includes("corrupt")), []);
+  const recovered = await store.recover();
+  assert.deepEqual(recovered, {generation: 0, bindings: {}});
+});
+
+test("state that parses but violates the contract is quarantined as corrupt", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skin-manager-"));
+  const store = new BindingStore(dir);
+  await store.commit({generation: 6, bindings: {}});
+  await store.commit({generation: 7, bindings: {}});
+  await writeFile(store.committedPath, `${JSON.stringify({generation: 7, bindings: {session: {slot: "overlay", package: {id: "a.b", version: "1.0.0", digest: digest("a")}, contribution: "main", generation: 4, state: "active"}}}, null, 2)}\n`, "utf8");
+  const read = await store.committed();
+  assert.equal(read.value, undefined);
+  assert.match(read.diagnostic ?? "", /PERSISTENCE_BINDING_SLOT_KEY/);
+  assert.ok(read.backupPath);
+  assert.match(await readFile(read.backupPath!, "utf8"), /overlay/);
+  assert.equal((await store.recover()).generation, 6, "previous-known-good is promoted instead of a corrupt commit");
+});
 
 test("catalog deduplicates installs and keeps unsigned packages third-party", () => {
   const catalog = new PackageCatalog();

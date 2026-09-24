@@ -10,6 +10,7 @@ export * from "./resolver/package-resolver.ts";
 export * from "./bindings/binding-store.ts";
 export * from "./persistence/atomic-json-store.ts";
 export * from "./diagnostics/diagnostic-store.ts";
+export * from "./diagnostics/redaction.ts";
 export * from "./runtime/index.ts";
 export * from "./transactions/slot-transaction-coordinator.ts";
 export * from "./transactions/force-enable.ts";

@@ -77,6 +77,77 @@ test("rejects a stale generation before it can replace the active slot", async (
   assert.equal(coordinator.active("session")?.package.id, "b");
 });
 
+test("a post-commit cleanup failure never un-publishes the generation that was already persisted", async () => {
+  const coordinator = new SlotTransactionCoordinator({timeoutMs: 100});
+  let persisted: SlotBinding | undefined;
+  let rollbacks = 0;
+  const result = await coordinator.switch({
+    slot: "session",
+    binding: binding("session", 2, "skin.b"),
+    previous: {binding: binding("session", 1, "skin.a"), dispose: () => { throw new Error("old contribution leaked"); }},
+    persist: async (binding) => { persisted = binding; },
+    contexts: [{id: "webview", activate: () => {}, commit: () => {}, rollback: () => { rollbacks += 1; }}]
+  });
+  assert.equal(persisted?.generation, 2);
+  assert.equal(coordinator.active("session")?.generation, 2, "memory must agree with the persisted generation");
+  assert.equal(coordinator.active("session")?.package.id, "skin.b");
+  assert.equal(rollbacks, 0, "committed contexts are not rolled back by a later cleanup failure");
+  assert.deepEqual(result.disposeErrors, ["dispose-old (previous): old contribution leaked"]);
+});
+
+test("a context that fails to dispose old is reported per context while the slot stays active", async () => {
+  const coordinator = new SlotTransactionCoordinator({timeoutMs: 100});
+  const result = await coordinator.switch({
+    slot: "session",
+    binding: binding("session", 2, "skin.b"),
+    contexts: [
+      {id: "shell", commit: () => {}, disposeOld: () => {}},
+      {id: "webview", commit: () => {}, disposeOld: () => { throw new Error("listener stuck"); }}
+    ]
+  });
+  assert.equal(coordinator.active("session")?.generation, 2);
+  assert.deepEqual(result.disposeErrors, ["dispose-old (webview): listener stuck"]);
+});
+
+test("the next switch cannot reuse a generation that was already committed", async () => {
+  const coordinator = new SlotTransactionCoordinator({timeoutMs: 100});
+  await coordinator.switch({
+    slot: "session",
+    binding: binding("session", 2, "skin.b"),
+    previous: {binding: binding("session", 1, "skin.a"), dispose: () => { throw new Error("dispose failed"); }},
+    contexts: [{id: "webview", commit: () => {}}]
+  });
+  await assert.rejects(
+    () => coordinator.switch({slot: "session", binding: binding("session", 2, "skin.c"), contexts: [{id: "webview"}]}),
+    (error: unknown) => error instanceof TransactionStageError && error.stage === "generation"
+  );
+});
+
+test("rollback runs in reverse registration order and a failing rollback cannot mask the original cause", async () => {
+  const events: string[] = [];
+  const coordinator = new SlotTransactionCoordinator({timeoutMs: 100});
+  await assert.rejects(() => coordinator.switch({
+    slot: "session",
+    binding: binding("session", 2, "skin.b"),
+    contexts: [
+      {id: "first", activate: () => {}, rollback: () => { events.push("first"); }},
+      {id: "second", activate: () => {}, rollback: () => { throw new Error("rollback failed"); }},
+      {id: "third", health: () => { throw new Error("health failed"); }, rollback: () => { events.push("third"); }}
+    ]
+  }), /health failed/);
+  assert.deepEqual(events, ["third", "first"]);
+});
+
+test("a stage that overruns its deadline fails as a timeout instead of hanging the slot queue", async () => {
+  const coordinator = new SlotTransactionCoordinator({timeoutMs: 10});
+  await assert.rejects(
+    () => coordinator.switch({slot: "session", binding: binding("session", 2, "skin.b"), contexts: [{id: "webview", activate: () => new Promise(() => {})}]}),
+    (error: unknown) => error instanceof TransactionStageError && error.stage === "activate" && /timed out after 10ms/.test(error.message)
+  );
+  const followUp = await coordinator.switch({slot: "session", binding: binding("session", 3, "skin.c"), contexts: [{id: "webview", activate: () => {}}]});
+  assert.equal(followUp.generation, 3);
+});
+
 test("requires every context to acknowledge commit before publishing active state", async () => {
   const coordinator = new SlotTransactionCoordinator({timeoutMs: 100});
   await assert.rejects(() => coordinator.switch({
