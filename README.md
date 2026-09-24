@@ -58,7 +58,7 @@ recovered generation 1 {"id":"example.midnight","version":"1.0.0","digest":"sha2
 ok
 ```
 
-From an application, consume the package the same way:
+From an application, consume the package the same way (see `examples/switch-slot.mjs` for the complete, executed version):
 
 ```js
 import {SkinManager} from "@dsh-eac/ui-skin-manager";
@@ -73,7 +73,10 @@ const manager = await SkinManager.open({
 
 await manager.importPackage(artifactPath);
 await manager.select([{slot: "session", packageId: "example.midnight", version: "1.0.0", contribution: "session.main"}]);
-const outcome = await manager.apply((binding) => [{id: `dom-root@1:${binding.slot}`, activate, health, commit, disposeOld}]);
+const outcome = await manager.apply((binding) => [{
+  id: `dom-root@1:${binding.slot}`,        // one context per mounted participant
+  prepare, preload, activate, health, commit, rollback, disposeOld
+}]);
 ```
 
 `select()` records a choice and changes nothing on screen; only `apply()` runs a transaction. A slot that fails
@@ -84,11 +87,11 @@ same object; `manager.log` and `manager.diagnostics` are what the host renders.
 ## Checks
 
 ```bash
-npm test              # 172 tests, no network, no fixtures outside test/fixtures
+npm test              # the whole suite, offline, no services
 npm run typecheck     # strict, exactOptionalPropertyTypes, noUncheckedIndexedAccess
 npm run format:check  # line endings, trailing whitespace, final newline
 npm run build         # dist/ with .d.ts and source maps
-npm run verify        # typecheck + test + format:check + build + conformance
+npm run verify        # typecheck + test + format:check + build + example + conformance
 ```
 
 Conformance for one or more manifests, optionally against an active host profile:
