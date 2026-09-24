@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   conformance:
     name: Node ${{ matrix.node }} conformance
@@ -20,9 +24,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
       - run: npm test
       - run: npm run format:check
-      - run: npm run conformance -- test/fixtures/valid/minimal-skin.json
+      - run: npm run conformance -- test/fixtures/valid/minimal-skin.json test/fixtures/valid/host-profile.json --profile test/fixtures/valid/host-profile.json
 
   package:
     name: Publish manager package artifact
@@ -32,11 +39,59 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+      - run: npm ci
       - run: mkdir -p dist && npm pack --pack-destination dist
+      - name: Install the packed tarball and use it from plain node
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          mv dist/*.tgz "$scratch/package.tgz"
+          cd "$scratch"
+          npm init -y >/dev/null 2>&1
+          npm install --ignore-scripts --no-audit --no-fund ./package.tgz >/dev/null
+          cat > smoke.mjs <<'NODE'
+          import assert from "node:assert/strict";
+          import {writeFileSync} from "node:fs";
+          import {createRequire} from "node:module";
+          import {CONTRACT_VERSION, satisfiesVersion, validateSkinManifest} from "@dsh-eac/ui-skin-manager";
+
+          assert.equal(CONTRACT_VERSION, "dsh-ui-skin-manager@1");
+          assert.equal(satisfiesVersion("0.4.0", "^0.3.0"), false, "caret-zero compatibility gate regressed");
+          assert.equal(satisfiesVersion("5.0.0", ">=1.0.0 <2.0.0"), false, "compound range upper bound regressed");
+
+          const require = createRequire(import.meta.url);
+          const schema = require("@dsh-eac/ui-skin-manager/schemas/skin-package.schema.json");
+          assert.equal(schema.properties.apiVersion.const, "dsh.eac.ui-skin/v1");
+
+          const digest = "a".repeat(64);
+          const manifest = {
+            apiVersion: "dsh.eac.ui-skin/v1",
+            kind: "SkinPackage",
+            metadata: {id: "third.party.skin", version: "1.0.0", name: "Third party", author: "publisher"},
+            engines: {manager: "^1.0.0", hostProfile: "^0.3.0"},
+            contributions: [{
+              id: "main", slot: "session", entry: "entry.js", assets: ["entry.js"],
+              requires: {capabilities: [], slotKind: ["region"], slotScope: ["window"]},
+              lifecycle: {mount: "mount", health: "health", unmount: "unmount"}
+            }],
+            assets: [{path: "entry.js", sha256: digest}],
+            integrity: {"entry.js": digest}
+          };
+          assert.equal(validateSkinManifest(manifest).ok, true);
+          writeFileSync("valid.json", JSON.stringify(manifest));
+          console.log("installed-package smoke test passed");
+          NODE
+          node smoke.mjs
+          node node_modules/@dsh-eac/ui-skin-manager/bin/dsh-skin.mjs check valid.json
+          echo '{"apiVersion":"nope"}' > broken.json
+          if node node_modules/@dsh-eac/ui-skin-manager/bin/dsh-skin.mjs check broken.json >/dev/null; then
+            echo "an invalid manifest must exit non-zero" >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: dsh-ui-skin-manager-${{ github.sha }}
           path: dist/*.tgz
           if-no-files-found: error
           retention-days: 14
-

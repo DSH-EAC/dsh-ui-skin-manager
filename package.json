@@ -1,24 +1,54 @@
 {
   "name": "@dsh-eac/ui-skin-manager",
   "version": "0.1.0-preview.1",
-  "description": "EAC-specific UI Skin package contracts and conformance preview",
+  "description": "EAC-specific UI Skin package loader, contracts, and lifecycle manager",
   "type": "module",
   "private": false,
+  "license": "MIT",
+  "author": "DSH-EAC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DSH-EAC/dsh-ui-skin-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DSH-EAC/dsh-ui-skin-manager/issues"
+  },
+  "homepage": "https://github.com/DSH-EAC/dsh-ui-skin-manager#readme",
+  "keywords": ["dsh", "eac", "ui-skin", "slot", "theming"],
   "engines": {
     "node": ">=22.6"
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schemas/*": "./schemas/*",
+    "./package.json": "./package.json"
   },
   "bin": {
-    "dsh-ui-skin-conformance-preview": "./bin/conformance-preview.mjs"
+    "dsh-skin": "./bin/dsh-skin.mjs"
   },
-  "files": ["bin", "schemas", "src"],
+  "files": [
+    "bin",
+    "dist",
+    "schemas",
+    "src"
+  ],
   "scripts": {
-    "test": "node --experimental-strip-types --test --test-concurrency=1 test/*.test.ts test/runtime/*.test.ts",
-    "test:schema": "node --experimental-strip-types --test --test-concurrency=1 test/schema.test.ts",
-    "conformance": "node --experimental-strip-types bin/conformance-preview.mjs",
-    "format:check": "node tools/check-format.mjs"
+    "prepare": "npm run build",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-timeout=30000 \"test/**/*.test.ts\"",
+    "test:schema": "node --experimental-strip-types --test --test-timeout=30000 test/schema.test.ts",
+    "conformance": "node bin/dsh-skin.mjs check",
+    "format:check": "node tools/check-format.mjs",
+    "verify": "npm run typecheck && npm test && npm run format:check && npm run build && npm run conformance -- test/fixtures/valid/minimal-skin.json"
   },
-  "license": "MIT"
+  "devDependencies": {
+    "@types/node": "^24.13.6",
+    "typescript": "5.9"
+  }
 }
