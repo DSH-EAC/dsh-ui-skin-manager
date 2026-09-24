@@ -5,10 +5,11 @@ import {fileURLToPath} from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const included = new Set([".json", ".md", ".mjs", ".ts", ".yml", ".yaml"]);
+const skipped = new Set([".git", ".qoder", "dist", "node_modules"]);
 const failures = [];
 async function walk(directory) {
   for (const entry of await readdir(directory, {withFileTypes: true})) {
-    if ([".git", "node_modules"].includes(entry.name)) continue;
+    if (skipped.has(entry.name)) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) await walk(path);
     else if (included.has(extname(entry.name))) {
