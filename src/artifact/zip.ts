@@ -52,6 +52,16 @@ function buildCrcTable(): Uint32Array {
 
 const CRC_TABLE = buildCrcTable();
 
+// Callers must be able to bound an artifact before they allocate it: reading a 10 GiB `skin.zip` into a
+// Uint8Array in order to discover it is over the limit has already ended the host process.
+export const ARCHIVE_LIMITS = {
+  archiveBytes: MAX_ARCHIVE_BYTES,
+  fileBytes: MAX_INFLATED_BYTES,
+  totalBytes: MAX_INFLATED_BYTES,
+  // A contract-v1 central directory cannot record more members than this even when it is well formed.
+  entries: UINT16_MAX
+} as const;
+
 export class ArchiveError extends Error {
   public override readonly name = "ArchiveError";
   public readonly code: string;

@@ -1,4 +1,5 @@
 import {isValidVersion, validateInstalledPackage} from "../contracts/validation.ts";
+import {storePath} from "../installer/package-installer.ts";
 import {AtomicJsonStore} from "../persistence/atomic-json-store.ts";
 import type {InstalledPackage, ValidationIssue} from "../contracts/models.ts";
 
@@ -28,11 +29,13 @@ const EMPTY: InstallIndex = {packages: {}};
 
 export class PackageCatalog {
   readonly index: AtomicJsonStore<InstallIndex> | undefined;
+  readonly packagesRoot: string | undefined;
   #packages = new Map<string, InstalledPackage>();
   #dirty = false;
 
-  constructor(options: {indexPath?: string} = {}) {
+  constructor(options: {indexPath?: string; packagesRoot?: string} = {}) {
     this.index = options.indexPath === undefined ? undefined : new AtomicJsonStore<InstallIndex>(options.indexPath);
+    this.packagesRoot = options.packagesRoot;
   }
 
   install(input: InstalledPackage): InstalledPackage {
@@ -108,11 +111,31 @@ export class PackageCatalog {
         issues.push(...validation.ok ? [{code: "PERSISTENCE_COORDINATE_MISMATCH", path: key, message: `key must be ${derived ?? "the package coordinate"}`}] : validation.issues);
         continue;
       }
+      // The record's own path has to be the path the store would have written it to. `versionPath` is the only
+      // place a host looks to find the code it is about to import, so an index edited - or carried over from a
+      // machine with a different root - to name somewhere else must be dropped, not trusted because it parsed.
+      const published = this.#publishedPath(item);
+      if (published !== undefined && published !== item.versionPath) {
+        issues.push({code: "PERSISTENCE_INSTALL_PATH", path: key, message: "names a location outside the content-addressed path for its own id, version and digest"});
+        continue;
+      }
       this.#packages.set(key, item);
       loaded += 1;
     }
     this.#dirty = false;
     return {issues, loaded};
+  }
+
+  #publishedPath(item: InstalledPackage): string | undefined {
+    if (this.packagesRoot === undefined) return undefined;
+    const {id, version} = item.manifest.metadata;
+    try {
+      return storePath(this.packagesRoot, id, version, item.digest);
+    } catch {
+      // `validateInstalledPackage` already refused an illegal coordinate; a store path cannot be derived from
+      // one, and the record has been reported rather than loaded.
+      return undefined;
+    }
   }
 
   async save(): Promise<boolean> {

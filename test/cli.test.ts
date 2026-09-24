@@ -56,6 +56,14 @@ test("an unreadable target is reported as an invalid target, not a crash", async
   assert.match(String(json(sink.out)[0]?.error), /ENOENT/);
 });
 
+test("an unreadable profile is a usage error while an unreadable target is an invalid target", async () => {
+  const sink = capture();
+  const code = await runCommand(["check", fixture("valid/minimal-skin.json"), "--profile", "no-such-profile.json"], sink.io);
+  assert.equal(code, EXIT_USAGE, "the profile is part of the invocation, so its path is reported as a usage failure");
+  assert.match(String(json(sink.err)[0]?.error), /ENOENT/);
+  assert.deepEqual(sink.out, [], "no verdict is printed for a run that never started");
+});
+
 test("usage and version are explicit exit codes", async () => {
   const help = capture();
   assert.equal(await runCommand([], help.io), EXIT_USAGE);

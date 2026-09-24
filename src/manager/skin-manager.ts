@@ -3,7 +3,7 @@ import {join} from "node:path";
 
 import {LIFECYCLE_DEADLINES} from "../contracts/constants.ts";
 import type {BindingGeneration, FaultEvent, HostProfile, InstalledPackage, SlotBinding} from "../contracts/models.ts";
-import {isErrorCode, validateHostProfile, validateSkinManifest} from "../contracts/validation.ts";
+import {isErrorCode, toFaultCode, validateHostProfile, validateSkinManifest} from "../contracts/validation.ts";
 import {ArtifactError, loadArtifact} from "../artifact/load.ts";
 import {InstallError, PackageInstaller} from "../installer/package-installer.ts";
 import {CatalogError, PackageCatalog} from "../catalog/package-catalog.ts";
@@ -12,7 +12,7 @@ import {BindingStore} from "../bindings/binding-store.ts";
 import {DiagnosticStore} from "../diagnostics/diagnostic-store.ts";
 import {StructuredLog} from "../diagnostics/structured-log.ts";
 import {SlotTransactionCoordinator, TransactionStageError} from "../transactions/slot-transaction-coordinator.ts";
-import type {SlotTransactionContext} from "../transactions/slot-transaction-coordinator.ts";
+import type {SlotTransactionContext, SlotTransactionResult} from "../transactions/slot-transaction-coordinator.ts";
 import {ForceEnableController} from "../transactions/force-enable.ts";
 import type {ForceEnableRequest, PendingForceEnable} from "../transactions/force-enable.ts";
 
@@ -70,6 +70,28 @@ export class ManagerError extends Error {
 
 const STAGES = new Set(["inspect", "resolve", "verify", "prepare", "preload", "activate", "health", "commit", "dispose", "recovery", "runtime"]);
 
+// docs/error-codes.md assigns a category per failure kind, so a stage name cannot simply be pasted after
+// "ACTIVATE_": a health probe that hung must be TIMEOUT_HEALTH_CHECK, and one that answered "no" must be
+// HEALTH_CHECK, or an operator grepping for HEALTH_ finds nothing while the skin is visibly broken.
+const STAGE_FAILURES: Record<string, {code: string; timeout: string; stage: string}> = {
+  generation: {code: "PREPARE_STALE_GENERATION", timeout: "TIMEOUT_STALE_GENERATION", stage: "prepare"},
+  prepare: {code: "PREPARE_CONTEXT", timeout: "TIMEOUT_CONTEXT", stage: "prepare"},
+  preload: {code: "PREPARE_PRELOAD", timeout: "TIMEOUT_PRELOAD", stage: "preload"},
+  activate: {code: "ACTIVATE_MOUNT", timeout: "TIMEOUT_MOUNT", stage: "activate"},
+  health: {code: "HEALTH_CHECK", timeout: "TIMEOUT_HEALTH_CHECK", stage: "health"},
+  commit: {code: "ACTIVATE_COMMIT", timeout: "TIMEOUT_COMMIT", stage: "commit"},
+  "commit-persistence": {code: "PERSISTENCE_COMMIT", timeout: "TIMEOUT_PERSISTENCE_COMMIT", stage: "commit"},
+  rollback: {code: "DISPOSE_ROLLBACK", timeout: "TIMEOUT_ROLLBACK", stage: "dispose"},
+  "dispose-old": {code: "DISPOSE_RESIDUE", timeout: "TIMEOUT_RESIDUE", stage: "dispose"}
+};
+
+const UNKNOWN_FAILURE = {code: "RUNTIME_FAILURE", timeout: "TIMEOUT_RUNTIME", stage: "runtime"};
+
+function stageFailure(stage: string, timedOut: boolean): {code: string; stage: string} {
+  const mapped = STAGE_FAILURES[stage] ?? UNKNOWN_FAILURE;
+  return {code: timedOut ? mapped.timeout : mapped.code, stage: mapped.stage};
+}
+
 export class SkinManager {
   readonly profile: HostProfile;
   readonly bindings: BindingStore;
@@ -82,6 +104,7 @@ export class SkinManager {
   readonly options: SkinManagerOptions;
   #generation = 0;
   #bindings: Record<string, SlotBinding> = {};
+  #busy: Promise<unknown> = Promise.resolve();
   #clock: () => Date;
 
   private constructor(options: SkinManagerOptions) {
@@ -89,7 +112,7 @@ export class SkinManager {
     this.profile = options.profile;
     this.#clock = options.clock ?? (() => new Date());
     this.bindings = new BindingStore(join(options.stateDirectory, "bindings"));
-    this.catalog = new PackageCatalog({indexPath: join(options.stateDirectory, "install-index.json")});
+    this.catalog = new PackageCatalog({indexPath: join(options.stateDirectory, "install-index.json"), packagesRoot: options.installRoot});
     this.installer = new PackageInstaller(options.installRoot);
     this.diagnostics = new DiagnosticStore();
     this.log = new StructuredLog({
@@ -113,40 +136,56 @@ export class SkinManager {
   // then previous-known-good, then the digest-locked default artifact.
   static async open(options: SkinManagerOptions): Promise<SkinManager> {
     const manager = new SkinManager(options);
+    try {
+      await manager.#start(options);
+    } catch (error) {
+      // The caller never receives the manager when startup fails, so this is the last chance to get the recorded
+      // faults onto disk - otherwise the only evidence of why recovery died is in memory that is about to be
+      // dropped. Flushing may not be the thing that replaces that evidence: an unusable log directory is a likely
+      // co-cause of the very failure being reported here.
+      await manager.flush().catch(() => undefined);
+      throw error;
+    }
+    return manager;
+  }
+
+  async #start(options: SkinManagerOptions): Promise<void> {
     const profile = validateHostProfile(options.profile);
     if (!profile.ok) throw new ManagerError("MANIFEST_HOST_PROFILE", profile.issues.map((entry) => `${entry.path} ${entry.code}`).join("; "));
     await mkdir(options.stateDirectory, {recursive: true});
-    await manager.log.rotate().catch(() => false);
-    await manager.log.purge().catch(() => 0);
+    await this.log.rotate().catch(() => false);
+    const retention = await this.log.purge().catch((error: unknown) => ({removed: 0, failures: [`the retention scan failed: ${error instanceof Error ? error.message : String(error)}`]}));
+    for (const failure of retention.failures) {
+      this.record("warning", "PERSISTENCE_LOG_RETENTION", "manager", "recovery", `an expired log archive could not be removed: ${failure}`, {recoverable: true, recoveryAction: "free-disk-space"});
+    }
 
-    const index = await manager.catalog.load();
+    const index = await this.catalog.load();
     for (const entry of index.issues) {
-      manager.record("warning", "PERSISTENCE_INSTALL_INDEX", "manager", "recovery", `the install index was degraded: ${entry.path} ${entry.code}`);
+      this.record("warning", "PERSISTENCE_INSTALL_INDEX", "manager", "recovery", `the install index was degraded: ${entry.path} ${entry.code}`);
     }
-    const committed = await manager.bindings.committed();
+    const committed = await this.bindings.committed();
     if (committed.diagnostic !== undefined) {
-      manager.record("error", "PERSISTENCE_CORRUPT", "manager", "recovery", `committed bindings were unreadable and were preserved for inspection: ${committed.diagnostic}`);
+      this.record("error", "PERSISTENCE_CORRUPT", "manager", "recovery", `committed bindings were unreadable and were preserved for inspection: ${committed.diagnostic}`);
     }
-    const pending = await manager.bindings.pending();
+    const pending = await this.bindings.pending();
     if (pending.value !== undefined) {
-      manager.record("warning", "RECOVERY_PENDING_DISCARDED", "manager", "recovery", `generation ${pending.value.generation} was staged but never committed, so it was discarded`);
+      this.record("warning", "RECOVERY_PENDING_DISCARDED", "manager", "recovery", `generation ${pending.value.generation} was staged but never committed, so it was discarded`);
     }
-    const recovered = await manager.bindings.recover();
-    manager.#bindings = recovered.bindings;
-    manager.#generation = recovered.generation;
-    if (committed.value === undefined && (await manager.bindings.previous()).value !== undefined) {
-      manager.record("warning", "RECOVERY_FALLBACK_APPLIED", "manager", "recovery", "committed bindings were absent, so the newest previous-known-good generation was promoted");
+    const recovered = await this.bindings.recover();
+    this.#bindings = recovered.bindings;
+    this.#generation = recovered.generation;
+    if (committed.value === undefined && (await this.bindings.previous()).value !== undefined) {
+      this.record("warning", "RECOVERY_FALLBACK_APPLIED", "manager", "recovery", "committed bindings were absent, so the newest previous-known-good generation was promoted");
     }
 
     if (options.defaultPackage !== undefined) {
       try {
-        await manager.importPackage(options.defaultPackage.artifactPath, {expectedDigest: options.defaultPackage.digest, source: "embedded"});
+        await this.importPackage(options.defaultPackage.artifactPath, {expectedDigest: options.defaultPackage.digest, source: "embedded"});
       } catch (error) {
         throw new ManagerError("RECOVERY_DEFAULT_UNAVAILABLE", `the digest-locked default skin could not be installed: ${error instanceof Error ? error.message : String(error)}`);
       }
-      await manager.#bindToDefault();
+      await this.#bindToDefault();
     }
-    return manager;
   }
 
   get generation(): number { return this.#generation; }
@@ -224,7 +263,11 @@ export class SkinManager {
   }
 
   // An explicit user choice only; nothing here switches a slot (ADR 0002 section 7).
-  async select(selections: SlotSelection[]): Promise<BindingGeneration> {
+  select(selections: SlotSelection[]): Promise<BindingGeneration> {
+    return this.#exclusive(() => this.#select(selections));
+  }
+
+  async #select(selections: SlotSelection[]): Promise<BindingGeneration> {
     const generation = this.#generation + 1;
     const bindings: Record<string, SlotBinding> = {...this.#bindings};
     for (const selection of selections) {
@@ -258,8 +301,14 @@ export class SkinManager {
   }
 
   // The host supplies the transaction contexts; the manager owns ordering, persistence, and rollback. Slots are
-  // applied sequentially so one commit never races another for the same state file.
-  async apply(contexts: (binding: SlotBinding) => SlotTransactionContext[]): Promise<ApplyOutcome> {
+  // applied sequentially inside one call, and the whole call holds the manager lock: two overlapping `apply()`
+  // runs each merge from a snapshot taken before the other landed, so the later write deletes the first one's
+  // slot from `committed.json` while both report success.
+  apply(contexts: (binding: SlotBinding) => SlotTransactionContext[]): Promise<ApplyOutcome> {
+    return this.#exclusive(() => this.#apply(contexts));
+  }
+
+  async #apply(contexts: (binding: SlotBinding) => SlotTransactionContext[]): Promise<ApplyOutcome> {
     const draft = (await this.bindings.draft()).value;
     const candidates = Object.entries(draft?.bindings ?? {}).filter(([slot, binding]) => this.#bindings[slot]?.package.digest !== binding.package.digest || this.#bindings[slot]?.contribution !== binding.contribution);
     if (draft === undefined || candidates.length === 0) {
@@ -271,13 +320,14 @@ export class SkinManager {
     for (const [slot, candidate] of candidates) {
       const rejection = await this.#verify({slot, packageId: candidate.package.id, version: candidate.package.version, contribution: candidate.contribution});
       if (rejection !== undefined) {
-        slots.push(this.#fail(slot, candidate, rejection.code, rejection.message, "choose-another-skin"));
+        slots.push(this.#fail(slot, candidate, rejection.code, "verify", rejection.message, "choose-another-skin"));
         continue;
       }
       const previous = this.#bindings[slot];
       const binding: SlotBinding = {...candidate, generation: ++this.#generation, state: "staged"};
+      let result: SlotTransactionResult;
       try {
-        const result = await this.transactions.switch({
+        result = await this.transactions.switch({
           slot,
           binding,
           contexts: contexts(binding),
@@ -286,9 +336,25 @@ export class SkinManager {
             await this.bindings.commit({generation: this.#generation, bindings: {...this.#bindings, [slot]: committed}});
           }
         });
-        this.#bindings = {...this.#bindings, [slot]: result.binding};
-        slots.push({slot, state: "active", binding: result.binding, disposeErrors: result.disposeErrors});
-        for (const message of result.disposeErrors) {
+      } catch (error) {
+        // A throw that is not a staged failure says nothing about which stage broke - it can be the host's own
+        // context factory - so it is reported under RUNTIME_* rather than pinned on a mount that may have
+        // succeeded. Claiming ACTIVATE_* here sends an operator to look at the wrong hook.
+        const staged = error instanceof TransactionStageError;
+        const failure = stageFailure(staged ? error.stage : "runtime", staged && error.timedOut);
+        const detail = error instanceof Error ? error.message : String(error);
+        // A stage that was abandoned after its abort was ignored is the one failure the rollback cannot be
+        // trusted to have undone, so the line has to say so rather than just reporting a timeout.
+        const message = staged && error.abandoned ? `${detail}; ${binding.package.id} had still not stopped when its abort was given up on, so an effect may land on ${slot} after the restore` : detail;
+        slots.push(this.#fail(slot, binding, failure.code, failure.stage, message, "restore-default"));
+        continue;
+      }
+      this.#bindings = {...this.#bindings, [slot]: result.binding};
+      // The candidate is mounted and its record is durable by this point. Everything below is bookkeeping about
+      // the generation it replaced, and a failure there must not report the switch itself as failed.
+      const disposeErrors = [...result.disposeErrors];
+      try {
+        for (const message of disposeErrors) {
           await this.bindings.quarantine(binding.package.id, slot, "DISPOSE_RESIDUE");
           this.record("error", "DISPOSE_RESIDUE", slot, "dispose", `${binding.package.id} left effects behind after being replaced: ${message}`, {
             packageId: binding.package.id,
@@ -300,16 +366,28 @@ export class SkinManager {
           });
         }
       } catch (error) {
-        const stage = error instanceof TransactionStageError ? error.stage : "activate";
-        slots.push(this.#fail(slot, binding, `ACTIVATE_${stage.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`, error instanceof Error ? error.message : String(error), "restore-default"));
+        const message = error instanceof Error ? error.message : String(error);
+        disposeErrors.push(`the residue could not be quarantined: ${message}`);
+        this.record("error", "PERSISTENCE_QUARANTINE", slot, "dispose", `${binding.package.id} left effects behind and could not be quarantined: ${message}`, {
+          packageId: binding.package.id,
+          packageVersion: binding.package.version,
+          packageDigest: binding.package.digest,
+          recoverable: true,
+          recoveryAction: "disable-package"
+        });
       }
+      slots.push({slot, state: "active", binding: result.binding, disposeErrors});
     }
     await this.bindings.discardPending();
     await this.clearDraft();
     return {generation: this.#generation, slots};
   }
 
-  async rollback(): Promise<BindingGeneration> {
+  rollback(): Promise<BindingGeneration> {
+    return this.#exclusive(() => this.#rollback());
+  }
+
+  async #rollback(): Promise<BindingGeneration> {
     const previous = (await this.bindings.previous()).value;
     if (previous === undefined) throw new ManagerError("RECOVERY_HISTORY_UNAVAILABLE", "there is no previous-known-good generation to roll back to");
     await this.bindings.commit(previous);
@@ -319,7 +397,11 @@ export class SkinManager {
     return structuredClone(previous);
   }
 
-  async disable(slot: string, packageId: string, reason = "CAPABILITY_USER_DISABLED"): Promise<void> {
+  disable(slot: string, packageId: string, reason = "CAPABILITY_USER_DISABLED"): Promise<void> {
+    return this.#exclusive(() => this.#disable(slot, packageId, reason));
+  }
+
+  async #disable(slot: string, packageId: string, reason: string): Promise<void> {
     if (!isErrorCode(reason)) throw new ManagerError("PERSISTENCE_QUARANTINE_REASON", `${JSON.stringify(reason)} is not a stable error code`);
     await this.bindings.quarantine(packageId, slot, reason);
     this.record("warning", "CAPABILITY_USER_DISABLED", slot, "commit", `${packageId} was disabled for ${slot}`, {packageId, recoverable: true, recoveryAction: "enable-package"});
@@ -368,7 +450,11 @@ export class SkinManager {
     return keys;
   }
 
-  async persist(): Promise<void> {
+  persist(): Promise<void> {
+    return this.#exclusive(() => this.#persist());
+  }
+
+  async #persist(): Promise<void> {
     await this.bindings.commit({generation: this.#generation, bindings: structuredClone(this.#bindings)});
     await this.catalog.save();
   }
@@ -379,14 +465,19 @@ export class SkinManager {
 
   record(severity: FaultEvent["severity"], errorCode: string, regionOrSlot: string, lifecycleStage: string, message: string, extra: Partial<FaultEvent> = {}): FaultEvent {
     const timestamp = this.#clock().toISOString();
+    // A code from the artifact or validator layer that is not a fault code is folded onto its category here and
+    // named in the message, instead of being persisted verbatim and rejected downstream: an operator reading the
+    // log has to find the same line they would find by grepping the thrown error.
+    const code = toFaultCode(errorCode);
+    const text = code === errorCode ? message : `${message} (${errorCode})`;
     const identity = [extra.packageId, extra.packageVersion, extra.packageDigest];
     const complete = identity.every((part) => typeof part === "string" && part.length > 0);
     const fault: FaultEvent = {
       timestamp,
       severity,
-      errorCode,
-      message,
-      correlationId: extra.correlationId ?? `${errorCode}-${regionOrSlot}-${this.#generation}`,
+      errorCode: code,
+      message: text,
+      correlationId: extra.correlationId ?? `${code}-${regionOrSlot}-${this.#generation}`,
       generation: extra.generation ?? this.#generation,
       regionOrSlot,
       lifecycleStage: STAGES.has(lifecycleStage) ? lifecycleStage : "recovery",
@@ -404,6 +495,15 @@ export class SkinManager {
     return fault;
   }
 
+  // One manager owns one set of slot files, so every read-modify-write of `#bindings` takes this turn: the lock
+  // is the only thing that makes "merge into the current bindings" mean "into the bindings as they are now".
+  // A rejected task is not allowed to strand the lock, or one failed switch would deadlocks every later call.
+  #exclusive<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.#busy.then(run, run);
+    this.#busy = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
   async #verify(selection: SlotSelection): Promise<{code: string; message: string} | undefined> {
     if (!this.profile.slots.some((slot) => slot.id === selection.slot)) return {code: "COMPATIBILITY_SLOT", message: `${selection.slot} is not offered by the host profile`};
     const item = this.catalog.get(selection.packageId, selection.version);
@@ -418,8 +518,8 @@ export class SkinManager {
     return undefined;
   }
 
-  #fail(slot: string, binding: SlotBinding, code: string, message: string, recoveryAction: string): SlotOutcome {
-    const fault = this.record("error", code, slot, "activate", message, {
+  #fail(slot: string, binding: SlotBinding, code: string, lifecycleStage: string, message: string, recoveryAction: string): SlotOutcome {
+    const fault = this.record("error", code, slot, lifecycleStage, message, {
       packageId: binding.package.id,
       packageVersion: binding.package.version,
       packageDigest: binding.package.digest,

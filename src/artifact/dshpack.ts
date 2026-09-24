@@ -1,5 +1,6 @@
-export const DSHPACK_CONTAINER_INTERFACE = "dshpack-ui-skin-container@1" as const;
-
+// The `dshpack-ui-skin-container@1` row of docs/ui-skin-cross-repo-interface-versions.md names this behaviour,
+// not a field: pack.json declares no interface key in ADR 0001, so recognition is the single `ui-skin`
+// content entry below and nothing more.
 export const PACK_MANIFEST = "pack.json";
 
 export class ContainerError extends Error {

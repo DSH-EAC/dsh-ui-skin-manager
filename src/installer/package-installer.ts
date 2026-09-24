@@ -1,10 +1,11 @@
-import {lstat, mkdir, rename, rm, stat, writeFile} from "node:fs/promises";
+import {lstat, mkdir, mkdtemp, rename, rm, stat, writeFile} from "node:fs/promises";
 import {dirname, isAbsolute, join, relative} from "node:path";
 
-import type {InstalledPackage, ValidationIssue} from "../contracts/models.ts";
-import {isSafePath, validateSkinManifest} from "../contracts/validation.ts";
+import type {InstalledPackage, SkinManifest, ValidationIssue} from "../contracts/models.ts";
+import {isPackageId, isSafePath, isValidVersion, validateSkinManifest} from "../contracts/validation.ts";
 import type {ArtifactFile, InventoryResult} from "../artifact/inventory.ts";
 import {sha256Hex, verifyInventory} from "../artifact/inventory.ts";
+import {loadArtifact} from "../artifact/load.ts";
 import type {LoadedArtifact} from "../artifact/load.ts";
 
 export interface ImportOptions {
@@ -40,6 +41,15 @@ function fail(code: string, detail: string, issues: ValidationIssue[] = []): nev
 
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 
+// This is the only definition of where a published package lives, so anything that has to trust a stored path
+// can ask for it instead of memorising the layout: a path that did not come from here is not a store path.
+export function storePath(root: string, id: string, version: string, digest: string): string {
+  if (!isPackageId(id)) fail("MANIFEST_ID", `${JSON.stringify(id)} is not a package identifier`);
+  if (!isValidVersion(version)) fail("MANIFEST_VERSION", `${id}@${JSON.stringify(version)} is not a SemVer version`);
+  if (!DIGEST.test(digest)) fail("INTEGRITY_DIGEST_INVALID", `${id}@${version} carries ${JSON.stringify(digest)}`);
+  return join(root, "packages", id, version, digest.slice("sha256:".length));
+}
+
 export class PackageInstaller {
   readonly root: string;
 
@@ -48,8 +58,10 @@ export class PackageInstaller {
     this.root = root;
   }
 
+  // Every path inside the store is built here, so this is the one place a coordinate has to be proven
+  // path-safe. Without it remove("../../victim", …) resolves outside the install root.
   versionPath(id: string, version: string, digest: string): string {
-    return join(this.root, "packages", id, version, digest.slice("sha256:".length));
+    return storePath(this.root, id, version, digest);
   }
 
   async import(artifact: LoadedArtifact, options: ImportOptions = {}): Promise<ImportResult> {
@@ -89,16 +101,22 @@ export class PackageInstaller {
       ...(artifact.container === undefined ? {} : {container: artifact.container}),
       ...(options.signature === undefined ? {} : {signature: options.signature})
     };
-    if (await exists(target)) return {installed, alreadyInstalled: true, verifiedFiles: payload.length};
+    if (await exists(target)) {
+      await this.#verifyPublished(target, manifest, digest);
+      return {installed, alreadyInstalled: true, verifiedFiles: payload.length};
+    }
 
-    const staging = `${target}.staging-${process.pid}-${Date.now()}`;
+    await mkdir(dirname(target), {recursive: true});
+    // Created exclusively under a random name: a predictable staging path would let anything that can write
+    // into the store pre-place a symlink there and have the staged bytes land outside the install root.
+    const staging = await mkdtemp(`${target}.staging-`);
     try {
-      await mkdir(staging, {recursive: true});
       for (const file of [...payload, ...artifact.files.filter((entry) => entry.name === MANIFEST_FILE)]) {
         await this.#write(staging, file);
       }
       if (await exists(target)) {
         await rm(staging, {recursive: true, force: true});
+        await this.#verifyPublished(target, manifest, digest);
         return {installed, alreadyInstalled: true, verifiedFiles: payload.length};
       }
       await rename(staging, target);
@@ -110,8 +128,26 @@ export class PackageInstaller {
     return {installed, alreadyInstalled: false, verifiedFiles: payload.length};
   }
 
+  // A published directory *is* the artifact's identity, so a re-import may not trust it merely because it
+  // exists. Without this, bytes edited or removed after install keep loading under the digest that names them.
+  async #verifyPublished(target: string, manifest: SkinManifest, digest: string): Promise<void> {
+    const coordinate = `${manifest.metadata.id}@${manifest.metadata.version}`;
+    let published: LoadedArtifact;
+    try {
+      published = await loadArtifact(target);
+    } catch (error) {
+      fail("INTEGRITY_MISMATCH", `${coordinate} is no longer a readable package in the store: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (published.manifest.metadata.id !== manifest.metadata.id || published.manifest.metadata.version !== manifest.metadata.version) {
+      fail("INTEGRITY_MISMATCH", `${target} declares ${published.manifest.metadata.id}@${published.manifest.metadata.version}, not ${coordinate}`);
+    }
+    const payload = published.files.filter((entry) => entry.name !== MANIFEST_FILE);
+    if (`sha256:${sha256Hex(contentDigestInput(payload))}` !== digest) {
+      fail("INTEGRITY_MISMATCH", `${coordinate} no longer matches the ${digest} that names its published bytes`);
+    }
+  }
+
   async remove(id: string, version: string, digest: string): Promise<boolean> {
-    if (!DIGEST.test(digest)) fail("INTEGRITY_DIGEST_INVALID", digest);
     const target = this.versionPath(id, version, digest);
     if (!(await exists(target))) return false;
     await rm(target, {recursive: true, force: true});
@@ -133,7 +169,7 @@ export class PackageInstaller {
   #chain(staging: string, directory: string): string[] {
     const steps: string[] = [];
     let cursor = directory;
-    while (cursor.length > staging.length && cursor.startsWith(staging)) {
+    while (cursor.length >= staging.length && cursor.startsWith(staging)) {
       steps.push(cursor);
       const parent = dirname(cursor);
       if (parent === cursor) break;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {DiagnosticStore, redact, redactDetail, validateFaultEvent, validateQuarantineRecords} from "../src/index.ts";
+import {DiagnosticStore, isErrorCode, redact, redactDetail, toFaultCode, validateFaultEvent, validateQuarantineRecords} from "../src/index.ts";
 
 const fault = (overrides: Record<string, unknown> = {}) => ({
   timestamp: "2026-09-24T00:00:00.000Z",
@@ -111,4 +111,52 @@ test("redactDetail keeps contract coordinates and hashes everything else", () =>
   assert.match(String(detail.home), /^#[0-9a-f]{16}$/);
   assert.match(String(detail.nested), /^#[0-9a-f]{16}$/, "a nested object is hashed rather than walked");
   assert.equal(detail.home, redactDetail({home}).home, "the hash is stable across runs");
+});
+
+test("a credential joined to its key by an underscore is still a credential", () => {
+  const cases: Array<[string, string, string]> = [
+    ["request rejected with access_token=gho_0123456789abcdef", "gho_0123456789abcdef", "access_token=<redacted>"],
+    ["refresh_token=gr_0123456789abcdef was rotated by the issuer", "gr_0123456789abcdef", "refresh_token=<redacted>"],
+    ["client_secret: superdupersecretvalue123 came from the profile", "superdupersecretvalue123", "client_secret=<redacted>"],
+    ['id_token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0" has expired', "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", "id_token=<redacted>"],
+    ["aws_secret_access_key=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY", "aws_secret_access_key=<redacted>"]
+  ];
+  for (const [message, secret, expected] of cases) {
+    const output = redact(message);
+    assert.ok(!output.includes(secret), `${JSON.stringify(message)} leaked ${JSON.stringify(secret)} as ${JSON.stringify(output)}`);
+    assert.ok(output.includes(expected), `${JSON.stringify(output)} no longer names which credential was redacted`);
+  }
+  for (const kept of ["tokenizer=v2 rejected the entry", "secretive:true is not a secret label"]) {
+    assert.equal(redact(kept), kept, `a word that only begins like a credential key must survive: ${JSON.stringify(kept)}`);
+  }
+});
+
+test("a contract field name does not license whatever shape arrives under it", () => {
+  const detail = redactDetail({slot: {token: "hunter2zero0key"}, regionOrSlot: ["password=hunter2zero0key"], contribution: "overlay.main", generation: 4});
+  assert.match(String(detail.slot), /^#[0-9a-f]{16}$/, "an object under `slot` is not a slot identifier, so it is hashed like any payload");
+  assert.match(String(detail.regionOrSlot), /^#[0-9a-f]{16}$/);
+  assert.ok(!JSON.stringify(detail).includes("hunter2zero0key"), "a nested value may not ride out under a name the reviewer trusts");
+  assert.equal(detail.contribution, "overlay.main", "a primitive under a contract name stays readable");
+  assert.equal(detail.generation, 4);
+});
+
+test("a diagnostic finer than the fourteen categories still lands as a legal fault code", () => {
+  const folded: Array<[string, string]> = [
+    ["ASSET_UNDECLARED", "MANIFEST_ASSETS"],
+    ["ASSET_DUPLICATE", "MANIFEST_ASSETS"],
+    ["CONTRIBUTION_DUPLICATE", "MANIFEST_CONTRIBUTION"],
+    ["ARCHIVE_CRC_MISMATCH", "INTEGRITY_ARCHIVE"],
+    ["ARCHIVE_TOO_LARGE", "INTEGRITY_ARCHIVE"],
+    ["ARTIFACT_FORMAT_UNSUPPORTED", "INTEGRITY_ARCHIVE"],
+    ["NOT_A_CATEGORY_AT_ALL", "RUNTIME_FAILURE"]
+  ];
+  for (const [origin, faultCode] of folded) {
+    assert.equal(toFaultCode(origin), faultCode, `${origin} has no category of its own`);
+    assert.ok(isErrorCode(toFaultCode(origin)), `${origin} folded into ${faultCode}, which is still not a legal fault code`);
+  }
+  for (const legal of ["PATH_SYMLINK", "HEALTH_CHECK", "TIMEOUT_HEALTH_CHECK", "DISPOSE_RESIDUE", "MANIFEST_ASSETS"]) {
+    assert.equal(toFaultCode(legal), legal, "an existing code is never renamed by the fold");
+  }
+  const fault = validateFaultEvent({timestamp: "2026-09-24T00:00:00.000Z", severity: "error", errorCode: toFaultCode("ASSET_UNDECLARED"), message: "x", correlationId: "c", generation: 1, regionOrSlot: "session", lifecycleStage: "verify", source: "third-party", recoverable: true, recoveryAction: "none", bindingState: "failed"});
+  assert.equal(fault.ok, true, "the folded code is the reason the fault survives, so it must satisfy the contract");
 });

@@ -87,13 +87,17 @@ export class ForceEnableController {
   async keep(slot: string): Promise<"kept" | "restored"> {
     const record = this.#pending.get(slot);
     if (!record) throw new Error(`FORCE_ENABLE_NOT_PENDING: ${slot}`);
-    this.#pending.delete(slot);
     try {
+      // The record stays pending while `commit` runs. Deleting it first means the expiry timer can no longer find
+      // it, so a commit that outlives the confirmation window would leave the forced target live with nothing
+      // left that could restore it - the one case the 30 seconds exists to catch.
       await record.request.commit();
     } catch {
       await this.#restore(record);
       return record.done;
     }
+    if (record.settled) return record.done;
+    this.#pending.delete(slot);
     record.settle("kept");
     return record.done;
   }
@@ -131,6 +135,9 @@ export class ForceEnableController {
         /* a failing fault sink must not strand the confirmation window */
       }
     } finally {
+      // "restored" records that the window closed by restoring, not that the restore was verified: a `restore()`
+      // that threw is reported through `onRestoreFailure`, which is where the manager learns the original binding
+      // is still not on screen and records the non-recoverable fault.
       record.settle("restored");
     }
   }

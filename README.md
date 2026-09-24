@@ -14,30 +14,69 @@ This package is a usable library and CLI, not a scaffold. It has no runtime depe
   compound AND sets and `||` alternation.
 - **Artifact ingestion** — a hand-written ZIP codec (CRC-32 verified, data-descriptor tolerant) and the
   `dshpack-ui-skin-container@1` envelope. Absolute, traversal, percent-encoded-traversal, empty-segment,
-  duplicate, case-colliding, symlinked, encrypted, exotic-method, ZIP64 and over-budget members are refused;
-  so is a generic feature pack that is not a skin.
+  duplicate, symlinked, encrypted, exotic-method, ZIP64 and over-budget members are refused; so is a generic
+  feature pack that is not a skin, and a directory payload entry that is a symlink, is not a regular file, or is
+  missing from or extra to the declared asset inventory.
 - **Content-addressed installation** — every declared SHA-256 is checked against the bytes received, the
   package digest is derived from them, and files are staged and renamed into `packages/<id>/<version>/<digest>`.
-  A failed gate publishes nothing.
+  Two payload names that are one file on a case-insensitive host are refused, a coordinate that would escape the
+  store is refused before it is joined, and a digest-named directory that no longer matches its own digest is
+  reported instead of trusted. A failed gate publishes nothing.
 - **A persisted install index**, dependency resolution against the active host profile, and garbage collection
-  that spares anything a committed, pending, draft or previous-known-good generation still references.
-- **Per-slot lifecycle** — `discover → inspect → resolve → verify → prepare → preload → activate → health → commit`,
-  with bounded idempotent disposal, a 30-second force-enable confirmation window that restores on failure,
-  atomic persistence with two previous-known-good generations, and corruption that is preserved for inspection
-  rather than laundered.
-- **Diagnostics** — a bounded fault store and an ADR 0002 section 6 JSONL log (16 MiB rotation, 30-day retention)
-  that redacts credentials and filesystem roots *before* persistence, while keeping package-relative paths readable.
-- **A conformance CLI** and six published JSON Schemas that a drift gate proves accept exactly what the
-  TypeScript validators accept.
+  that spares anything a committed, pending, draft or retained generation still references.
+- **Per-slot lifecycle** — ADR 0002 sequences `discover → inspect → resolve → verify → prepare → preload →
+  activate → health → commit`. `select()` verifies a choice against the catalog and the host profile and records
+  it as a draft; resolving a dependency graph happens when a package is imported, not when a slot is chosen.
+  `apply()` re-checks the slot against the profile, the catalog record, the quarantine list and
+  that the contribution really targets the slot, then runs `prepare`, `preload`, `activate` and `health` for
+  every mounted participant before anything is committed. Each stage carries the ADR deadline, and a stage that
+  misses it aborts that transaction with the matching `TIMEOUT_*` code. A slot that fails keeps the binding it had.
+- **Bounded cleanup** — post-commit disposal runs once per participant under the same deadline; residue there is
+  collected, quarantined and reported without un-publishing the generation that already persisted.
+- **Atomic persistence** — an interrupted write cannot expose a half generation, and the two most recent
+  committed generations are retained for recovery. A store that fails to parse is preserved for inspection and
+  reported as `PERSISTENCE_CORRUPT` rather than overwritten.
+- **Force-enable** — the target is staged, a 30-second confirmation window opens, and the original binding is
+  restored if the window lapses, activation fails, or the commit fails. The host supplies the stage hooks, so
+  which package may be force-enabled (never `system.default`, per ADR 0002) is the host's decision, not one this
+  repository can audit from a string.
+- **Diagnostics** — a bounded fault store and an ADR 0002 section 6 JSONL log (16 MiB rotation, 30-day retention
+  pruned at start) that redacts credentials and filesystem roots *before* persistence while keeping
+  package-relative paths readable. An archive that retention cannot delete is reported as a
+  `PERSISTENCE_LOG_RETENTION` warning at start, a rotation whose rename fails is reported in the write result, and
+  a log directory that cannot be written at all comes back as a rejected write rather than an unhandled rejection.
+- **A conformance CLI** and six published JSON Schemas (2020-12). A differential gate runs documents through both
+  the schema and the TypeScript validator and fails if they diverge from the recorded expectation; the eight
+  places where they differ on purpose are each justified in the gate itself.
 
 What is deliberately **not** here: release automation for provenance and whole-archive digests, the
 `system.default` skin content (it belongs to `dsh-desktop-eac-default-skins`), and the EAC host's own
 Tauri/WebView runtime adapters, window behaviour and slot topology.
 
+### Known gaps
+
+Four ADR 0002 behaviours are implemented as state transitions but not yet as runtime behaviour. They are recorded
+here rather than left implicit: the first two need a decision about host behaviour, and the last two are this
+repository's own deviations from the letter of the ADR.
+
+- **`rollback()` recovers the record, not the screen.** It re-commits the previous generation and re-points the
+  manager at it; it does not run a reverse transaction, so mount hooks are not called and the display keeps
+  showing the rolled-back skin until the host applies the recovered bindings (section 3).
+- **Force-enable trusts the host's hooks.** `ForceEnableRequest` carries strings plus `activate`/`restore`/`commit`
+  closures, so the manager cannot tell a `system.default` target from any other and cannot itself refuse to
+  force the default (section 3, "non-forceable").
+- **Retained generations are the last two *committed* ones.** `PreviousKnownGood` in the ADR also has to be
+  complete, healthy and digest-verified; recovery validates the retained records against the binding schema and
+  trusts the store's bytes from there (sections 1 and 3).
+- **Deadlines are per stage.** The coordinator gives each stage the 10-second `activate` deadline, where section
+  4 budgets 10 seconds for `prepare` + `preload` together and for `deactivate` + `dispose` together, so a
+  transaction may spend up to 20 seconds in those pairs.
+
 ## Requirements
 
-Node `>=22.6` (`package.json` `engines`) — the test and conformance scripts run TypeScript directly through
-`node --experimental-strip-types`. `npm ci` installs only `typescript` and `@types/node`.
+Node `>=22.6` (`package.json` `engines`) — `npm test` runs TypeScript directly through
+`node --experimental-strip-types`; `npm run conformance` runs the compiled CLI out of `dist/`, so it needs
+`npm run build` first. `npm ci` installs only `typescript` and `@types/node`.
 
 ## Try it
 
@@ -80,9 +119,13 @@ const outcome = await manager.apply((binding) => [{
 ```
 
 `select()` records a choice and changes nothing on screen; only `apply()` runs a transaction. A slot that fails
-keeps the binding it had and is reported in `outcome.slots` with its `FaultEvent` — it never cancels a slot that
-already committed. `rollback()`, `disable()`, `enable()`, `beginForceEnable()` and `collectGarbage()` are on the
-same object; `manager.log` and `manager.diagnostics` are what the host renders.
+keeps the binding it had — the `binding` in its `outcome.slots` entry is the rejected candidate, and the slot
+still resolves to whatever was active before — and it is reported there with its `FaultEvent`. It never cancels a
+slot that already committed. `disable()`, `enable()`, `beginForceEnable()` and `collectGarbage()` are on the same object;
+`manager.log` and `manager.diagnostics` are what the host renders.
+
+`rollback()` recovers *recorded* state only — see [Known gaps](#known-gaps) for why a host has to `apply()` again
+to make the display follow it.
 
 ## Checks
 
@@ -101,8 +144,17 @@ node bin/dsh-skin.mjs check test/fixtures/valid/minimal-skin.json
 node bin/dsh-skin.mjs check my-skin.json --profile test/fixtures/valid/host-profile.json
 ```
 
-Each target prints one JSON object on stdout so release CI can consume it. Exit codes: `0` valid, `1` a
-manifest failed validation, `2` the command was wrong.
+The `test/fixtures/...` paths above are from a repository checkout: the published tarball ships `bin`, `dist`,
+`examples`, `schemas` and `src`, not `test`. Substitute your own manifest and profile, or run the shipped
+example with `npm run example`.
+
+Each target prints one JSON object on stdout so release CI can consume it. Exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | every target validated |
+| `1` | a manifest failed validation, a target could not be read or parsed, or `--profile` named a file that fails the host-profile contract |
+| `2` | the invocation was wrong: no or unknown command, unknown option, no target, `--profile` without a path, or a `--profile` file that could not be read or parsed |
 
 ## Layout
 

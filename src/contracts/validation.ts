@@ -19,8 +19,33 @@ const zIndexRange = (value: unknown): value is {min: number; max: number} => rec
 const issue = (issues: ValidationIssue[], code: string, path: string, message: string): void => { issues.push({code, path, message}); };
 const result = <T>(value: unknown, issues: ValidationIssue[]): ValidationResult<T> => issues.length === 0 ? {ok: true, issues, value: value as T} : {ok: false, issues};
 
+export function isPackageId(value: unknown): value is string {
+  return typeof value === "string" && ID.test(value);
+}
+
 export function isErrorCode(value: unknown): value is string {
   return typeof value === "string" && ERROR_CODE.test(value);
+}
+
+// Validation and archive parsing report at finer granularity than the fourteen fault categories allow:
+// `ASSET_UNDECLARED`, `ARCHIVE_CRC_MISMATCH` and `CONTRIBUTION_DUPLICATE` are all real diagnostics but none of
+// them is a legal `FaultEvent.errorCode`. Held to the contract they are dropped by DiagnosticStore and the
+// persisted line reads `RECOVERY_DIAGNOSTIC_UNCLASSIFIED`, so the thrown error and the log entry disagree about
+// what happened. This folds each family onto the category that owns it; the caller keeps the source code in the
+// message, which is the only place a finer-grained identifier may live.
+const FAULT_CODE_FAMILIES: ReadonlyArray<{origin: RegExp; fault: string}> = [
+  {origin: /^ARCHIVE_/, fault: "INTEGRITY_ARCHIVE"},
+  {origin: /^ARTIFACT_/, fault: "INTEGRITY_ARCHIVE"},
+  {origin: /^ASSET_/, fault: "MANIFEST_ASSETS"},
+  {origin: /^CONTRIBUTION_/, fault: "MANIFEST_CONTRIBUTION"}
+];
+
+export function toFaultCode(code: string): string {
+  if (isErrorCode(code)) return code;
+  for (const family of FAULT_CODE_FAMILIES) {
+    if (family.origin.test(code)) return family.fault;
+  }
+  return "RUNTIME_FAILURE";
 }
 
 export function isSafePath(path: unknown): path is string {

@@ -294,3 +294,33 @@ test("content addressing is reproducible across stores and re-installs", async (
   const leftovers = await readdir(join(base, "store", "packages", "third.party.skin", "1.0.0")).catch(() => []);
   assert.deepEqual(leftovers, [], "a failed or reused import leaves no .staging directory behind");
 });
+
+test("a store coordinate is proven path-safe before it is turned into a path", async () => {
+  const base = await workspace();
+  const installer = new PackageInstaller(join(base, "store"));
+  const digest = `sha256:${"a".repeat(64)}`;
+  const victim = join(base, "victim", "1.0.0", digest.slice(7));
+  await mkdir(victim, {recursive: true});
+  await writeFile(join(victim, "precious.txt"), "keep me", "utf8");
+
+  assert.equal(await code(() => installer.remove("../../victim", "1.0.0", digest)), "MANIFEST_ID");
+  assert.equal(await code(() => installer.remove("victim", "v1.0.0", digest)), "MANIFEST_VERSION");
+  assert.equal(await code(() => installer.remove("victim", "1.0.0", "sha256:zz")), "INTEGRITY_DIGEST_INVALID");
+  assert.throws(() => installer.versionPath("a/b", "1.0.0", digest), /MANIFEST_ID/);
+  assert.equal(await readFile(join(victim, "precious.txt"), "utf8"), "keep me", "a refused coordinate may not delete anything");
+});
+
+test("a reused installation is re-verified against the digest that names it", async () => {
+  const base = await workspace();
+  const artifact = await loadArtifact(await stage(base, DEFAULT_FILES));
+  const installer = new PackageInstaller(join(base, "store"));
+  const first = await installer.import(artifact);
+  assert.equal((await installer.import(artifact)).alreadyInstalled, true, "an intact tree is still reused");
+
+  const entry = join(first.installed.versionPath, "regions/session/entry.js");
+  await writeFile(entry, "export const mount = () => steal();\n", "utf8");
+  assert.equal(await code(() => installer.import(artifact)), "INTEGRITY_MISMATCH", "bytes edited after publish must not keep loading");
+  await writeFile(entry, DEFAULT_FILES[0]!.data, "utf8");
+  await rm(join(first.installed.versionPath, "manifest.json"), {force: true});
+  assert.equal(await code(() => installer.import(artifact)), "INTEGRITY_MISMATCH", "a stripped manifest is not an intact installation");
+});

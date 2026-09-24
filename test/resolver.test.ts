@@ -62,10 +62,12 @@ const code = (run: () => unknown): string => {
 
 test("resolution walks dependencies and reports the profile's digest-locked fallback", () => {
   const root = manifest("root.skin", "1.0.0", {dependencies: [{id: "dependency.skin", range: "^1.0.0"}]});
-  const resolved = resolve(root, [installedOf(root), installed("dependency.skin", "1.4.2", "b")]);
+  const dependency = installed("dependency.skin", "1.4.2", "b");
+  const resolved = resolve(root, [installedOf(root), dependency]);
   assert.deepEqual(resolved.packages.map((item) => `${item.manifest.metadata.id}@${item.manifest.metadata.version}`), ["dependency.skin@1.4.2", "root.skin@1.0.0"]);
   assert.deepEqual(resolved.fallback, profile.fallbackSkin, "the fallback must come from the host profile, not a hard-coded coordinate");
-  assert.notEqual(resolved.packages[0], installed("dependency.skin"), "resolution hands out copies, not live catalog records");
+  assert.notStrictEqual(resolved.packages[0], dependency, "resolution hands out copies, not the records it was given");
+  assert.deepEqual(resolved.packages[0], dependency, "the copy still describes the same package");
 });
 
 test("the highest satisfying version wins and a two-digit version does not lose", () => {

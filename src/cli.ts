@@ -36,7 +36,8 @@ Options:
   -h, --help        show this help
   -v, --version     print the contract and package versions
 
-Exit codes: 0 valid, 1 a manifest failed validation, 2 the command was wrong.
+Exit codes: 0 every target validated; 1 a target failed validation or could not be read;
+            2 the invocation was wrong, including an unreadable --profile path.
 Output is one JSON object per target on stdout so release CI can consume it.`;
 
 async function readJson(path: string): Promise<unknown> {

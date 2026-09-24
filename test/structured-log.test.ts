@@ -154,16 +154,56 @@ test("purge applies the retention floor to archived files only", async () => {
   for (const path of [aged, fresh, unrelated]) await appendFile(path, `${JSON.stringify(fault())}\n`, "utf8");
   await utimes(aged, new Date(old), new Date(old));
   await store.write(fault({message: "current"}));
-  assert.equal(await store.purge(), 1);
+  assert.deepEqual(await store.purge(), {removed: 1, failures: []});
   const names = await readdir(store.directory);
   assert.ok(!names.includes("skin-events-2020-01-01T00-00-00-000Z.jsonl"));
   assert.deepEqual(names.filter((name) => name.startsWith("skin-events")).sort(), ["skin-events-2026-09-23T00-00-00-000Z.jsonl", "skin-events.jsonl"]);
   assert.ok(names.includes("something-else.jsonl"), "a purge never touches another subsystem's files");
 });
 
+test("a retention deletion that fails is reported instead of swallowed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "skin-log-"));
+  const store = await log({directory, retentionDays: 30});
+  // A directory wearing an archive name cannot be unlinked on any platform, which is exactly the case the
+  // retention rule promises to report rather than ignore.
+  const blocked = join(directory, "skin-events-2020-01-01T00-00-00-000Z.jsonl");
+  await mkdir(blocked, {recursive: true});
+  const old = NOW.getTime() - 40 * 24 * 60 * 60 * 1000;
+  await utimes(blocked, new Date(old), new Date(old));
+  const outcome = await store.purge();
+  assert.equal(outcome.removed, 0);
+  assert.deepEqual(outcome.failures.map((failure) => failure.split(":")[0]), ["skin-events-2020-01-01T00-00-00-000Z.jsonl"]);
+});
+
+test("an unusable log directory is reported instead of becoming an unhandled rejection", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "skin-log-"));
+  // A file sitting where the log directory belongs fails every filesystem step the writer takes. It must still
+  // come back as a result: SkinManager.record() does not await this call, so a rejected queue would surface as an
+  // unhandled rejection, and Node's default policy would take the host process down with it.
+  const blocked = join(directory, "skin-events.jsonl");
+  await appendFile(blocked, "not a directory", "utf8");
+  const store = new StructuredLog({directory: join(blocked, "nested")});
+  const escapes: unknown[] = [];
+  const note = (reason: unknown): void => {
+    escapes.push(reason);
+  };
+  process.on("unhandledRejection", note);
+  try {
+    const outcome = await store.write(fault());
+    assert.equal(outcome.written, false);
+    assert.match(String(outcome.rejected), /ENOTDIR|EPERM|ENOTEMPTY|EBUSY/);
+    void store.write(fault({correlationId: "abandoned"}));
+    await store.flush();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  } finally {
+    process.off("unhandledRejection", note);
+  }
+  assert.deepEqual(escapes, [], "a write may not reject a queue its caller abandoned");
+});
+
 test("purge tolerates a missing directory and concurrent writes stay whole-line", async () => {
   const missing = new StructuredLog({directory: join(await mkdtemp(join(tmpdir(), "skin-log-")), "not-created")});
-  assert.equal(await missing.purge(), 0);
+  assert.deepEqual(await missing.purge(), {removed: 0, failures: []});
   await Promise.all(Array.from({length: 20}, (_, index) => missing.write(fault({message: `line ${index}`, correlationId: `c${index}`}))));
   await missing.flush();
   const written = await lines(missing.activePath);

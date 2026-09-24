@@ -16,6 +16,23 @@ test("force enable requires target slot, exposes a 30 second confirmation, and c
   assert.deepEqual(events, ["activate", "commit"]);
 });
 
+test("a force-enable commit that outlives the confirmation window can still be restored by the window", async () => {
+  const events: string[] = [];
+  let releaseCommit!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseCommit = resolve; });
+  const controller = new ForceEnableController({now: () => 0, timeoutMs: 30_000});
+  const pending = controller.begin({slot: "session", target: "skin.incompatible", previous: "system.default", activate: () => { events.push("activate"); }, restore: () => { events.push("restore"); }, commit: async () => { await gate; }});
+  const keeping = controller.keep("session");
+  await new Promise((resolve) => { setImmediate(resolve); });
+
+  await controller.expireImmediately("session");
+  assert.deepEqual(events, ["activate", "restore"], "a pending record deleted before its commit settled leaves the expiry timer with nothing to restore");
+  releaseCommit();
+  assert.equal(await keeping, "restored", "a commit that lands after the restore did not keep the target");
+  assert.equal(await pending.done, "restored");
+  assert.equal(controller.active("session"), "system.default");
+});
+
 test("force enable restores the previous binding on timeout and never promotes pending after restart", async () => {
   let now = 0;
   const events: string[] = [];

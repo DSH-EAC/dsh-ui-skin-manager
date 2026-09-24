@@ -87,7 +87,7 @@ async function digestOf(artifactPath: string, probeRoot: string): Promise<string
   return (await new PackageInstaller(probeRoot).import(await loadArtifact(artifactPath))).installed.digest;
 }
 
-async function harness() {
+async function harness(extra: {transactionTimeoutMs?: number} = {}) {
   const base = await mkdtemp(join(tmpdir(), "skin-manager-"));
   const defaultDir = await artifact(join(base, "artifacts"), skinOf("system.default", "2.0.0", ["session", "overlay"]));
   const digest = await digestOf(defaultDir, join(base, "probe"));
@@ -96,7 +96,7 @@ async function harness() {
   const installRoot = join(base, "store");
   let elapsed = 0;
   const clock = () => new Date(BASE + elapsed);
-  const options = {stateDirectory, installRoot, profile, managerVersion: "1.0.0", defaultPackage: {artifactPath: defaultDir, digest}, clock};
+  const options = {stateDirectory, installRoot, profile, managerVersion: "1.0.0", defaultPackage: {artifactPath: defaultDir, digest}, clock, ...extra};
   const manager = await SkinManager.open(options);
   return {
     base,
@@ -244,13 +244,60 @@ test("a slot that fails health keeps its own binding while an unrelated slot is 
   assert.equal(bindings.overlay?.package.id, "system.default");
   const failed = outcome.slots[1];
   assert.ok(failed?.state === "failed");
-  assert.equal(failed.fault.errorCode, "ACTIVATE_HEALTH");
-  assert.equal(failed.fault.lifecycleStage, "activate");
+  assert.equal(failed.fault.errorCode, "HEALTH_CHECK", "a health failure carries the HEALTH_ category the catalogue defines");
+  assert.equal(failed.fault.lifecycleStage, "health");
   assert.equal(failed.fault.bindingState, "failed");
   assert.equal(failed.fault.packageId, "party.both");
   assert.equal(validateFaultEvent(failed.fault).ok, true);
   assert.match(failed.error.message, /health refused party.both/);
   assert.equal((await env.bindings.pending()).value, undefined);
+});
+
+test("a stage that hangs is reported under TIMEOUT_ rather than as a plain activation failure", async () => {
+  const env = await harness({transactionTimeoutMs: 60});
+  await env.selectParty("party.both", ["session", "overlay"], ["overlay", "overlay.main"]);
+  const outcome = await env.manager.apply((binding) => [
+    {id: `hang:${binding.slot}`, health: () => new Promise<void>(() => undefined)}
+  ]);
+  const failed = outcome.slots[0];
+  assert.ok(failed?.state === "failed");
+  assert.equal(failed.fault.errorCode, "TIMEOUT_HEALTH_CHECK");
+  assert.equal(failed.fault.lifecycleStage, "health");
+  assert.match(failed.error.message, /timed out after 60ms/);
+  assert.equal(env.manager.status().bindings.overlay?.package.id, "system.default", "a hung health probe may not publish the candidate");
+});
+
+test("a stage that stops when its transaction is aborted cannot overtake the rollback", async () => {
+  const env = await harness({transactionTimeoutMs: 40});
+  await env.selectParty("party.session", ["session"], ["session", "session.main"]);
+  const order: string[] = [];
+  const outcome = await env.manager.apply((binding) => [{
+    id: `late:${binding.slot}`,
+    activate: (_binding, signal) => new Promise<void>((resolve) => {
+      signal.addEventListener("abort", () => { order.push("activate stopped"); resolve(); });
+    }),
+    rollback: () => { order.push("rollback"); }
+  }]);
+
+  const failed = outcome.slots[0];
+  assert.ok(failed?.state === "failed");
+  assert.equal(failed.fault.errorCode, "TIMEOUT_MOUNT");
+  assert.deepEqual(order, ["activate stopped", "rollback"], "the abandoned activation has to be seen to stop before the slot is handed back");
+  assert.ok(!failed.error.message.includes("may land"), "a stage that observed its abort leaves nothing behind to warn about");
+  assert.equal(env.manager.status().bindings.session?.package.id, "system.default");
+});
+
+test("a stage that ignores its abort is reported as an effect that may still land", async () => {
+  const env = await harness({transactionTimeoutMs: 30});
+  await env.selectParty("party.session", ["session"], ["session", "session.main"]);
+  const outcome = await env.manager.apply((binding) => [
+    {id: `deaf:${binding.slot}`, activate: () => new Promise<void>(() => undefined)}
+  ]);
+
+  const failed = outcome.slots[0];
+  assert.ok(failed?.state === "failed");
+  assert.equal(failed.fault.errorCode, "TIMEOUT_MOUNT");
+  assert.match(failed.error.message, /may land on session after the restore/, "a hook that never stopped is the one rollback the manager cannot vouch for");
 });
 
 test("disposal residue quarantines the new package without un-publishing it", async () => {
@@ -270,6 +317,18 @@ test("disposal residue quarantines the new package without un-publishing it", as
   assert.deepEqual(await env.manager.quarantined(), []);
   assert.equal((await env.manager.select([{slot: "session", packageId: "party.session", version: "1.0.0", contribution: "session.main"}])).bindings.session?.package.id, "party.session", "an enabled package can be selected again");
   assert.equal(await refused(() => env.manager.disable("session", "party.session", "a human typed this")), "PERSISTENCE_QUARANTINE_REASON", "a quarantine reason must be a stable error code");
+});
+
+test("a quarantine survives a restart and still refuses the package that caused it", async () => {
+  const env = await harness();
+  await env.selectParty("party.session", ["session"], ["session", "session.main"]);
+  await env.manager.apply(tracer({slot: "session", stage: "disposeOld"}).contexts);
+
+  const reopened = await env.open();
+  assert.deepEqual(await reopened.quarantined(), [{packageId: "party.session", slot: "session", reason: "DISPOSE_RESIDUE"}], "the record must be durable, not in-memory");
+  assert.equal(await refused(() => reopened.select([{slot: "session", packageId: "party.session", version: "1.0.0", contribution: "session.main"}])), "DISPOSE_RESIDUE");
+  assert.equal(reopened.diagnostics.dropped, 0, "a stored quarantine must not be rejected as unreadable on the next start");
+  assert.ok((await readdir(join(env.base, "state", "bindings"))).includes("quarantine.json"));
 });
 
 test("select refuses a slot the profile does not offer and a package that is not installed", async () => {
@@ -428,6 +487,68 @@ test("every fault the manager records reaches the structured log as a valid Faul
     assert.equal(validateFaultEvent(entry).ok, true, JSON.stringify(entry));
     assert.equal(entry.errorCode, exported[index]?.errorCode);
   }
-  assert.deepEqual(written.map((entry) => entry.errorCode), ["COMPATIBILITY_SLOT", "ACTIVATE_ACTIVATE", "CAPABILITY_USER_DISABLED"]);
+  assert.deepEqual(written.map((entry) => entry.errorCode), ["COMPATIBILITY_SLOT", "ACTIVATE_MOUNT", "CAPABILITY_USER_DISABLED"]);
   assert.equal(env.manager.log.directory, join(env.base, "state", "logs"));
+});
+
+test("a fault code finer than the fourteen categories is persisted legally and still names its source", async () => {
+  const env = await harness();
+  env.manager.record("error", "ASSET_UNDECLARED", "session", "verify", "party.session declares regions/session/theme.css twice");
+  await env.manager.flush();
+
+  const written = await logged(env.logPath);
+  const last = written.at(-1);
+  assert.equal(last?.errorCode, "MANIFEST_ASSETS", "an operator greps the category, so the line has to carry one");
+  assert.match(String(last?.message), /ASSET_UNDECLARED/, "and the finer code the caller actually threw must survive in the message");
+  assert.equal(validateFaultEvent(last).ok, true);
+  assert.equal(env.manager.diagnostics.dropped, 0, "a folded fault may not still be dropped for its code");
+});
+
+test("a host callback that throws before the transaction is not reported as a failed mount", async () => {
+  const env = await harness();
+  await env.selectParty("party.session", ["session"], ["session", "session.main"]);
+  const outcome = await env.manager.apply(() => {
+    throw new Error("the host could not build a transaction context");
+  });
+
+  const failed = outcome.slots[0];
+  assert.ok(failed?.state === "failed");
+  assert.equal(failed.fault.errorCode, "RUNTIME_FAILURE", "no stage ran, so ACTIVATE_* would point at a hook that never executed");
+  assert.equal(failed.fault.lifecycleStage, "runtime");
+  assert.equal(env.manager.status().bindings.session?.package.id, "system.default", "nothing was published");
+});
+
+test("a rollback that overlaps a suspended apply is not overwritten by its commit", async () => {
+  const env = await harness();
+  await env.selectParty("party.session", ["session"], ["session", "session.main"]);
+  let entered!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+
+  const applying = env.manager.apply((binding) => [{id: `gate:${binding.slot}`, activate: async () => { entered(); await gate; }}]);
+  await started;
+  const rolling = env.manager.rollback();
+  release();
+  await Promise.all([applying, rolling]);
+
+  const committed = (await env.bindings.committed()).value;
+  assert.equal(committed?.bindings.session?.package.id, "system.default", "an explicit rollback is the later operation and has to win the file");
+});
+
+test("an install index entry pointing away from its own published path is dropped", async () => {
+  const env = await harness();
+  // The default is re-imported from its digest on every start whatever the index says, so the entry that proves
+  // the gate has to be one nothing re-creates: a third-party package the host would otherwise mount.
+  await env.manager.importPackage(await env.publish(skinOf("party.session", "1.0.0", ["session"])));
+  const index = join(env.base, "state", "install-index.json");
+  const record = JSON.parse(await readFile(index, "utf8")) as {packages: Record<string, {versionPath: string}>};
+  const elsewhere = join(env.base, "elsewhere", "payload");
+  for (const item of Object.values(record.packages)) item.versionPath = elsewhere;
+  await writeFile(index, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+
+  const reopened = await env.open();
+  assert.deepEqual(reopened.status().installed.map((item) => item.id), ["system.default"], "a record whose path the store would never have written is not a package");
+  assert.ok(reopened.diagnostics.export().some((entry) => entry.errorCode === "PERSISTENCE_INSTALL_INDEX"), "and dropping it has to be reported, not done quietly");
+  assert.equal(await refused(() => reopened.select([{slot: "session", packageId: "party.session", version: "1.0.0", contribution: "session.main"}])), "DEPENDENCY_MISSING", "the host cannot be handed the redirected path to mount");
 });

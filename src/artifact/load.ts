@@ -6,7 +6,7 @@ import {isSafePath, validateSkinManifest} from "../contracts/validation.ts";
 import {PACK_MANIFEST, readContainer, stripPayloadRoot} from "./dshpack.ts";
 import type {ContainerError, SkinPayload} from "./dshpack.ts";
 import {sha256Hex, type ArtifactFile} from "./inventory.ts";
-import {ArchiveError, isZip, readZip} from "./zip.ts";
+import {ARCHIVE_LIMITS, ArchiveError, isZip, readZip} from "./zip.ts";
 
 export type ArtifactKind = "directory" | "zip" | "dshpack";
 
@@ -48,10 +48,19 @@ function parseManifest(files: ArtifactFile[], source: string): SkinManifest {
   return validation.value!;
 }
 
-async function readDirectory(root: string): Promise<ArtifactFile[]> {
+export interface ArtifactLimits {
+  archiveBytes: number;
+  fileBytes: number;
+  totalBytes: number;
+  entries: number;
+}
+
+async function readDirectory(root: string, budget: ArtifactLimits): Promise<ArtifactFile[]> {
   const files: ArtifactFile[] = [];
+  let totalBytes = 0;
   const walk = async (directory: string, prefix: string): Promise<void> => {
     for (const entry of await readdir(directory, {withFileTypes: true})) {
+      if (files.length >= budget.entries) throw new ArtifactError("ARTIFACT_TOO_LARGE", `${root} holds more than ${budget.entries} members`);
       const absolute = join(directory, entry.name);
       const name = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
       if (!isSafePath(name)) throw new ArtifactError("PATH_UNSAFE", name);
@@ -62,6 +71,11 @@ async function readDirectory(root: string): Promise<ArtifactFile[]> {
         continue;
       }
       if (!stats.isFile()) throw new ArtifactError("PATH_SPECIAL_FILE", `${name} is neither a file nor a directory`);
+      // The declared size is checked before the read for the same reason the archive is: a sparse file must not
+      // be pulled into memory on the way to being refused.
+      if (stats.size > budget.fileBytes) throw new ArtifactError("ARTIFACT_TOO_LARGE", `${name} is larger than ${budget.fileBytes} bytes`);
+      totalBytes += stats.size;
+      if (totalBytes > budget.totalBytes) throw new ArtifactError("ARTIFACT_TOO_LARGE", `${root} holds more than ${budget.totalBytes} bytes`);
       files.push({name, data: new Uint8Array(await readFile(absolute))});
     }
   };
@@ -105,14 +119,18 @@ function asContainer(entries: ArtifactFile[], source: string, archiveDigest: str
   };
 }
 
-export async function loadArtifact(source: string): Promise<LoadedArtifact> {
+// The budget is the point of this function: `readZip` can only refuse an archive it has already been handed,
+// so the size that decides whether to read at all has to be taken from the directory entry.
+export async function loadArtifact(source: string, limits: Partial<ArtifactLimits> = {}): Promise<LoadedArtifact> {
+  const budget: ArtifactLimits = {...ARCHIVE_LIMITS, ...limits};
   const stats = await lstat(source);
   if (stats.isSymbolicLink()) throw new ArtifactError("PATH_SYMLINK", `${source} is a symlink`);
   if (stats.isDirectory()) {
-    const files = await readDirectory(source);
+    const files = await readDirectory(source, budget);
     return {source, kind: "directory", files, manifest: parseManifest(files, source)};
   }
   if (!stats.isFile()) throw new ArtifactError("ARTIFACT_NOT_REGULAR", `${source} is neither a directory nor an archive`);
+  if (stats.size > budget.archiveBytes) throw new ArtifactError("ARTIFACT_TOO_LARGE", `${source} is ${stats.size} bytes, over the ${budget.archiveBytes} an archive may have`);
   const bytes = new Uint8Array(await readFile(source));
   if (!isZip(bytes)) throw new ArtifactError("ARTIFACT_FORMAT_UNSUPPORTED", `${source} is not a zip, a .dshpack, or a directory`);
   const entries = readArchive(bytes, source);
