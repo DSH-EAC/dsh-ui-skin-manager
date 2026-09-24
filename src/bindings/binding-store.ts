@@ -1,7 +1,7 @@
 import {mkdir, rename, unlink} from "node:fs/promises";
 import {join} from "node:path";
 import type {BindingGeneration, QuarantineRecord} from "../contracts/models.ts";
-import {validateBindingGeneration, validateQuarantineRecords} from "../contracts/validation.ts";
+import {isErrorCode, validateBindingGeneration, validateQuarantineRecords} from "../contracts/validation.ts";
 import {AtomicJsonStore} from "../persistence/atomic-json-store.ts";
 
 export type {BindingGeneration, QuarantineRecord};
@@ -51,6 +51,9 @@ export class BindingStore {
     const records = await this.#quarantineList();
     const next = records.filter((item) => !(item.packageId === packageId && item.slot === slot));
     const record: QuarantineRecord = {packageId, slot, reason, timestamp: new Date().toISOString()};
+    // The reason has to be a stable error code, because a host greps for it. Refusing it here is cheap; accepting
+    // one and then failing the read of the whole file would drop every other quarantine.
+    if (!isErrorCode(reason)) throw new Error(`PERSISTENCE_QUARANTINE_REASON: ${JSON.stringify(reason)} is not a stable error code`);
     next.push(record);
     await new AtomicJsonStore<QuarantineRecord[]>(this.quarantinePath).write(next);
     return record;

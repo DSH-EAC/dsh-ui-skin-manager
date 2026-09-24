@@ -19,6 +19,10 @@ const zIndexRange = (value: unknown): value is {min: number; max: number} => rec
 const issue = (issues: ValidationIssue[], code: string, path: string, message: string): void => { issues.push({code, path, message}); };
 const result = <T>(value: unknown, issues: ValidationIssue[]): ValidationResult<T> => issues.length === 0 ? {ok: true, issues, value: value as T} : {ok: false, issues};
 
+export function isErrorCode(value: unknown): value is string {
+  return typeof value === "string" && ERROR_CODE.test(value);
+}
+
 export function isSafePath(path: unknown): path is string {
   if (typeof path !== "string" || path.length === 0 || path.includes("\\") || path.includes("\0")) return false;
   if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) return false;

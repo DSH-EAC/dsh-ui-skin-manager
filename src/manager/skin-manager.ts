@@ -3,7 +3,7 @@ import {join} from "node:path";
 
 import {LIFECYCLE_DEADLINES} from "../contracts/constants.ts";
 import type {BindingGeneration, FaultEvent, HostProfile, InstalledPackage, SlotBinding} from "../contracts/models.ts";
-import {validateHostProfile, validateSkinManifest} from "../contracts/validation.ts";
+import {isErrorCode, validateHostProfile, validateSkinManifest} from "../contracts/validation.ts";
 import {ArtifactError, loadArtifact} from "../artifact/load.ts";
 import {InstallError, PackageInstaller} from "../installer/package-installer.ts";
 import {CatalogError, PackageCatalog} from "../catalog/package-catalog.ts";
@@ -228,7 +228,7 @@ export class SkinManager {
     const generation = this.#generation + 1;
     const bindings: Record<string, SlotBinding> = {...this.#bindings};
     for (const selection of selections) {
-      const rejection = this.#verify(selection);
+      const rejection = await this.#verify(selection);
       if (rejection !== undefined) {
         const fault = this.record("error", rejection.code, selection.slot, "verify", rejection.message, {
           packageId: selection.packageId,
@@ -269,7 +269,7 @@ export class SkinManager {
     await this.bindings.stage(draft);
     const slots: SlotOutcome[] = [];
     for (const [slot, candidate] of candidates) {
-      const rejection = this.#verify({slot, packageId: candidate.package.id, version: candidate.package.version, contribution: candidate.contribution});
+      const rejection = await this.#verify({slot, packageId: candidate.package.id, version: candidate.package.version, contribution: candidate.contribution});
       if (rejection !== undefined) {
         slots.push(this.#fail(slot, candidate, rejection.code, rejection.message, "choose-another-skin"));
         continue;
@@ -319,7 +319,8 @@ export class SkinManager {
     return structuredClone(previous);
   }
 
-  async disable(slot: string, packageId: string, reason = "USER_DISABLED"): Promise<void> {
+  async disable(slot: string, packageId: string, reason = "CAPABILITY_USER_DISABLED"): Promise<void> {
+    if (!isErrorCode(reason)) throw new ManagerError("PERSISTENCE_QUARANTINE_REASON", `${JSON.stringify(reason)} is not a stable error code`);
     await this.bindings.quarantine(packageId, slot, reason);
     this.record("warning", "CAPABILITY_USER_DISABLED", slot, "commit", `${packageId} was disabled for ${slot}`, {packageId, recoverable: true, recoveryAction: "enable-package"});
   }
@@ -403,10 +404,12 @@ export class SkinManager {
     return fault;
   }
 
-  #verify(selection: SlotSelection): {code: string; message: string} | undefined {
+  async #verify(selection: SlotSelection): Promise<{code: string; message: string} | undefined> {
     if (!this.profile.slots.some((slot) => slot.id === selection.slot)) return {code: "COMPATIBILITY_SLOT", message: `${selection.slot} is not offered by the host profile`};
     const item = this.catalog.get(selection.packageId, selection.version);
     if (!item) return {code: "DEPENDENCY_MISSING", message: `${selection.packageId}@${selection.version} is not installed`};
+    const quarantined = await this.bindings.isQuarantined(selection.packageId, selection.slot);
+    if (quarantined !== undefined) return {code: quarantined.reason, message: `${selection.packageId} is quarantined for ${selection.slot} (${quarantined.reason}), enable it before switching back`};
     const validation = validateSkinManifest(item.manifest, {profile: this.profile});
     if (!validation.ok) return {code: validation.issues[0]?.code ?? "MANIFEST_INVALID", message: `${selection.packageId}: ${validation.issues.map((entry) => `${entry.path} ${entry.code}`).join("; ")}`};
     const contribution = item.manifest.contributions.find((candidate) => candidate.id === selection.contribution);

@@ -61,6 +61,11 @@ consumer; it is the difference between the placeholder repository and a usable p
   collection unreachable for anything the manager installed.
 - `SkinManager.open()` re-bound every contributed slot to the default skin on each start, overwriting the
   user's saved choice; the default now seeds only slots that carry no binding.
+- A package quarantined for a slot could be switched straight back in, so `disable()` recorded a fault and
+  changed nothing. Selection and apply now refuse a quarantined coordinate until `enable()`. The default
+  reason became `CAPABILITY_USER_DISABLED` (the previous `USER_DISABLED` is not a valid code in any
+  category), and a reason that is not a stable error code is refused at the call instead of being written
+  out and making the whole quarantine file unreadable on the next start.
 - Eight pre-existing type errors (implicit `any` inside a frozen runtime context, a disposer whose return type
   did not match, `exactOptionalPropertyTypes` mismatches) are gone and `npm run typecheck` gates CI.
 

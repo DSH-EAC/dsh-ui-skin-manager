@@ -264,8 +264,12 @@ test("disposal residue quarantines the new package without un-publishing it", as
   assert.notEqual(fault, undefined);
   assert.equal(fault?.lifecycleStage, "dispose");
   assert.equal(fault?.recoveryAction, "disable-package");
+  assert.equal(await refused(() => env.manager.select([{slot: "session", packageId: "party.session", version: "1.0.0", contribution: "session.main"}])), "DISPOSE_RESIDUE", "a quarantined package may not be switched back in");
+  assert.equal(env.manager.status().bindings.session?.package.id, "party.session", "quarantining does not undo the generation that committed");
   assert.equal(await env.manager.enable("session", "party.session"), true);
   assert.deepEqual(await env.manager.quarantined(), []);
+  assert.equal((await env.manager.select([{slot: "session", packageId: "party.session", version: "1.0.0", contribution: "session.main"}])).bindings.session?.package.id, "party.session", "an enabled package can be selected again");
+  assert.equal(await refused(() => env.manager.disable("session", "party.session", "a human typed this")), "PERSISTENCE_QUARANTINE_REASON", "a quarantine reason must be a stable error code");
 });
 
 test("select refuses a slot the profile does not offer and a package that is not installed", async () => {
