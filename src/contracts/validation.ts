@@ -12,6 +12,10 @@ const ERROR_CODE = new RegExp(`^(?:${ERROR_CATEGORIES.join("|")})_[A-Z0-9][A-Z0-
 
 const record = (value: unknown): value is Record<string, any> => typeof value === "object" && value !== null && !Array.isArray(value);
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
+const filled = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+const filledStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(filled);
+const requirementList = (value: unknown): value is string[] => filledStrings(value) && value.length > 0;
+const zIndexRange = (value: unknown): value is {min: number; max: number} => record(value) && Number.isSafeInteger(value.min) && Number.isSafeInteger(value.max);
 const issue = (issues: ValidationIssue[], code: string, path: string, message: string): void => { issues.push({code, path, message}); };
 const result = <T>(value: unknown, issues: ValidationIssue[]): ValidationResult<T> => issues.length === 0 ? {ok: true, issues, value: value as T} : {ok: false, issues};
 
@@ -41,7 +45,7 @@ export function validateSlotContribution(value: unknown, path = "contribution"):
     if (!record(value.style) || !isSafePath(value.style.entry) || !strings(value.style.assets)) issue(issues, "MANIFEST_STYLE", `${path}.style`, "must declare a safe entry and assets array");
     else unsafePaths(issues, value.style.assets, `${path}.style.assets`);
   }
-  if (!record(value.requires) || !strings(value.requires.capabilities) || !strings(value.requires.slotKind) || !strings(value.requires.slotScope)) issue(issues, "MANIFEST_REQUIRES", `${path}.requires`, "must declare capabilities, slotKind and slotScope arrays");
+  if (!record(value.requires) || !filledStrings(value.requires.capabilities) || !requirementList(value.requires.slotKind) || !requirementList(value.requires.slotScope)) issue(issues, "MANIFEST_REQUIRES", `${path}.requires`, "must declare non-empty slotKind and slotScope lists of non-empty strings");
   if (!record(value.lifecycle) || ["mount", "health", "unmount"].some((key) => {
     const hook: unknown = value.lifecycle?.[key];
     return typeof hook !== "string" || hook.length === 0;
@@ -57,16 +61,16 @@ export function validateHostProfile(value: unknown): ValidationResult<HostProfil
   }
   if (value.id !== HOST_PROFILE_ID) issue(issues, "MANIFEST_HOST_PROFILE_ID", "$.id", `must equal ${HOST_PROFILE_ID}`);
   if (!isValidVersion(value.version)) issue(issues, "MANIFEST_VERSION", "$.version", "must be SemVer");
-  if (!strings(value.regions) || value.regions.length === 0) issue(issues, "MANIFEST_REGIONS", "$.regions", "must be a non-empty string array");
+  if (!filledStrings(value.regions) || value.regions.length === 0) issue(issues, "MANIFEST_REGIONS", "$.regions", "must be a non-empty array of non-empty strings");
   if (!Array.isArray(value.slots) || value.slots.length === 0) issue(issues, "MANIFEST_SLOTS", "$.slots", "must be a non-empty array");
   else for (const [index, slot] of value.slots.entries()) {
-    if (!record(slot) || typeof slot.id !== "string" || typeof slot.region !== "string" || typeof slot.kind !== "string" || typeof slot.scope !== "string" || !record(slot.propsSchema) || typeof slot.mountContract !== "string" || !record(slot.zIndexPolicy) || !strings(slot.capabilities) || typeof slot.fallbackSkin !== "string") issue(issues, "MANIFEST_SLOT_DESCRIPTOR", `$.slots[${index}]`, "is incomplete");
+    if (!record(slot) || !filled(slot.id) || !filled(slot.region) || !filled(slot.kind) || !filled(slot.scope) || !record(slot.propsSchema) || !filled(slot.mountContract) || !zIndexRange(slot.zIndexPolicy) || !filledStrings(slot.capabilities) || !filled(slot.fallbackSkin)) issue(issues, "MANIFEST_SLOT_DESCRIPTOR", `$.slots[${index}]`, "is incomplete");
   }
-  if (!strings(value.instanceKinds)) issue(issues, "MANIFEST_INSTANCE_KINDS", "$.instanceKinds", "must be a string array");
-  if (!record(value.zIndexPolicy)) issue(issues, "MANIFEST_Z_INDEX", "$.zIndexPolicy", "must be an object");
-  if (!Array.isArray(value.capabilities)) issue(issues, "MANIFEST_CAPABILITIES", "$.capabilities", "must be an array");
+  if (!filledStrings(value.instanceKinds)) issue(issues, "MANIFEST_INSTANCE_KINDS", "$.instanceKinds", "must be an array of non-empty strings");
+  if (!record(value.zIndexPolicy) || !Object.values(value.zIndexPolicy).every(zIndexRange)) issue(issues, "MANIFEST_Z_INDEX", "$.zIndexPolicy", "must map every region to an integer min and max");
+  if (!Array.isArray(value.capabilities) || !value.capabilities.every((capability) => record(capability) && ID.test(String(capability.id)) && isValidVersion(capability.version))) issue(issues, "MANIFEST_CAPABILITIES", "$.capabilities", "must be an array of {id, version} capabilities");
   if (!Array.isArray(value.dshAdapters)) issue(issues, "MANIFEST_DSH_ADAPTERS", "$.dshAdapters", "must be an array");
-  if (!record(value.fallbackSkin) || typeof value.fallbackSkin.id !== "string" || !isValidVersion(value.fallbackSkin.version) || !DIGEST.test(value.fallbackSkin.digest)) issue(issues, "MANIFEST_FALLBACK", "$.fallbackSkin", "must be an exact package coordinate");
+  if (!record(value.fallbackSkin) || !ID.test(String(value.fallbackSkin.id)) || !isValidVersion(value.fallbackSkin.version) || !DIGEST.test(String(value.fallbackSkin.digest))) issue(issues, "MANIFEST_FALLBACK", "$.fallbackSkin", "must be an exact package coordinate");
   return result(value, issues);
 }
 
@@ -247,6 +251,7 @@ export function validateFaultEvent(value: unknown): ValidationResult<FaultEvent>
     }
   }
   if (value.control !== undefined && (typeof value.control !== "string" || value.control.length === 0)) issue(issues, "MANIFEST_FAULT_EVENT_CONTROL", "$.control", "must be a non-empty string");
+  if (value.detail !== undefined && !record(value.detail)) issue(issues, "MANIFEST_FAULT_EVENT_DETAIL", "$.detail", "must be an object");
   return result(value, issues);
 }
 

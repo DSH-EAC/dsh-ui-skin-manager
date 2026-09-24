@@ -6,17 +6,17 @@
   "additionalProperties": false,
   "required": ["id", "slot", "entry", "assets", "requires", "lifecycle"],
   "properties": {
-    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"},
+    "id": {"$ref": "./skin-package.schema.json#/$defs/identifier"},
     "slot": {"type": "string", "minLength": 1},
-    "entry": {"type": "string", "minLength": 1},
-    "assets": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "entry": {"$ref": "./skin-package.schema.json#/$defs/safePath"},
+    "assets": {"type": "array", "items": {"$ref": "./skin-package.schema.json#/$defs/safePath"}},
     "style": {
       "type": "object",
       "additionalProperties": false,
       "required": ["entry", "assets"],
       "properties": {
-        "entry": {"type": "string", "minLength": 1},
-        "assets": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        "entry": {"$ref": "./skin-package.schema.json#/$defs/safePath"},
+        "assets": {"type": "array", "items": {"$ref": "./skin-package.schema.json#/$defs/safePath"}}
       }
     },
     "requires": {

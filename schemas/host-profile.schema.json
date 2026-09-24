@@ -7,29 +7,46 @@
   "required": ["id", "version", "regions", "slots", "instanceKinds", "zIndexPolicy", "capabilities", "dshAdapters", "fallbackSkin"],
   "properties": {
     "id": {"const": "dsh-desktop-eac-ui-skin-profile"},
-    "version": {"type": "string"},
-    "regions": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "version": {"$ref": "./skin-package.schema.json#/$defs/semver"},
+    "regions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
     "slots": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/slot"}},
-    "instanceKinds": {"type": "array", "items": {"enum": ["popup", "dialog", "floating-window"]}},
-    "zIndexPolicy": {"type": "object"},
-    "capabilities": {"type": "array", "items": {"type": "object"}},
+    "instanceKinds": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "zIndexPolicy": {"type": "object", "additionalProperties": {"$ref": "#/$defs/zIndexRange"}},
+    "capabilities": {"type": "array", "items": {"$ref": "#/$defs/capability"}},
     "dshAdapters": {"type": "array"},
-    "fallbackSkin": {"$ref": "#/$defs/packageCoordinate"}
+    "fallbackSkin": {"$ref": "./slot-binding.schema.json#/$defs/packageCoordinate"}
   },
   "$defs": {
-    "slot": {
+    "zIndexRange": {
       "type": "object",
-      "required": ["id", "region", "kind", "scope", "propsSchema", "mountContract", "zIndexPolicy", "capabilities", "fallbackSkin"],
+      "additionalProperties": false,
+      "required": ["min", "max"],
+      "properties": {"min": {"type": "integer"}, "max": {"type": "integer"}}
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
       "properties": {
-        "id": {"type": "string"}, "region": {"type": "string"}, "kind": {"type": "string"}, "scope": {"type": "string"},
-        "propsSchema": {"type": "object"}, "mountContract": {"type": "string"}, "zIndexPolicy": {"type": "object"},
-        "capabilities": {"type": "array", "items": {"type": "string"}}, "fallbackSkin": {"type": "string"}
+        "id": {"$ref": "./skin-package.schema.json#/$defs/identifier"},
+        "version": {"$ref": "./skin-package.schema.json#/$defs/semver"}
       }
     },
-    "packageCoordinate": {
+    "slot": {
       "type": "object",
-      "required": ["id", "version", "digest"],
-      "properties": {"id": {"type": "string"}, "version": {"type": "string"}, "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}}
+      "additionalProperties": false,
+      "required": ["id", "region", "kind", "scope", "propsSchema", "mountContract", "zIndexPolicy", "capabilities", "fallbackSkin"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "region": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "scope": {"type": "string", "minLength": 1},
+        "propsSchema": {"type": "object"},
+        "mountContract": {"type": "string", "minLength": 1},
+        "zIndexPolicy": {"$ref": "#/$defs/zIndexRange"},
+        "capabilities": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "fallbackSkin": {"type": "string", "minLength": 1}
+      }
     }
   }
 }

@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dsh-eac.github.io/schemas/ui-skin/v1/skin-package.schema.json",
   "title": "DSH EAC UI Skin Package",
+  "description": "The shared grammar every ui-skin contract file reuses. test/schema-drift.test.ts proves each pattern below accepts exactly what src/contracts/validation.ts accepts, so a rule cannot be tightened on one side alone.",
   "type": "object",
   "additionalProperties": false,
   "required": ["apiVersion", "kind", "metadata", "engines", "contributions", "assets", "integrity"],
@@ -13,7 +14,7 @@
       "additionalProperties": false,
       "required": ["id", "version", "name", "author"],
       "properties": {
-        "id": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"},
+        "id": {"$ref": "#/$defs/identifier"},
         "version": {"$ref": "#/$defs/semver"},
         "name": {"type": "string", "minLength": 1},
         "author": {"type": "string", "minLength": 1}
@@ -36,7 +37,7 @@
         "additionalProperties": false,
         "required": ["id", "range"],
         "properties": {
-          "id": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"},
+          "id": {"$ref": "#/$defs/identifier"},
           "range": {"$ref": "#/$defs/semverRange"}
         }
       }
@@ -57,9 +58,24 @@
     "integrity": {"type": "object", "additionalProperties": {"$ref": "#/$defs/sha256"}}
   },
   "$defs": {
-    "semver": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"},
-    "semverRange": {"type": "string", "pattern": "^(?:[~^]|>=?|<=?)?[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\s+(?:<|<=|>|>=)[0-9]+\\.[0-9]+\\.[0-9]+)?$"},
-    "safePath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
-    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+    "identifier": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"},
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+(?:[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$"
+    },
+    "semverRange": {
+      "type": "string",
+      "pattern": "^\\s*(?:<=|>=|<|>|=|\\^|~)?(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+(?:[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?(?:\\s+(?:<=|>=|<|>|=|\\^|~)?(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+(?:[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?)*\\s*(?:\\|\\|\\s*(?:<=|>=|<|>|=|\\^|~)?(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+(?:[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?(?:\\s+(?:<=|>=|<|>|=|\\^|~)?(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+(?:[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?)*\\s*)*$"
+    },
+    "safePath": {
+      "type": "string",
+      "pattern": "^(?!(?:\\.|\\.\\.)(?:/|$))(?![A-Za-z]:)[^\\\\/\\u0000]+(?:/(?!(?:\\.|\\.\\.)(?:/|$))[^\\\\/\\u0000]+)*$"
+    },
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "errorCode": {
+      "type": "string",
+      "pattern": "^(?:MANIFEST|COMPATIBILITY|INTEGRITY|PATH|DEPENDENCY|CAPABILITY|PREPARE|ACTIVATE|HEALTH|TIMEOUT|RUNTIME|DISPOSE|PERSISTENCE|RECOVERY)_[A-Z0-9][A-Z0-9_]*$"
+    }
   }
 }
