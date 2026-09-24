@@ -41,9 +41,12 @@ export class PackageCatalog {
     if (previous && previous.digest !== input.digest) {
       throw new CatalogError("INTEGRITY_COORDINATE_CONFLICT", `${key} is already installed as ${previous.digest}, ${input.digest} is a different artifact`);
     }
+    // Installing is a registration, not a reference: a binding, a pending generation or the embedded default is what
+    // holds a package, so an import may not silently make itself uncollectable. An explicit hold still counts, and
+    // the higher of the recorded and incoming counts wins.
     const item: InstalledPackage = {
       ...input,
-      refCount: (previous?.refCount ?? input.refCount ?? 0) + 1,
+      refCount: Math.max(previous?.refCount ?? 0, input.refCount ?? 0),
       official: input.official === true && input.source === "embedded"
     };
     this.#packages.set(key, item);

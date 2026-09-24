@@ -178,12 +178,13 @@ export function validateBindingGeneration(value: unknown): ValidationResult<Bind
   if (!Number.isSafeInteger(value.generation) || value.generation < 0) issue(issues, "PERSISTENCE_BINDING_GENERATION", "$.generation", "must be a non-negative integer");
   if (!record(value.bindings)) issue(issues, "PERSISTENCE_BINDING_RECORDS", "$.bindings", "must be an object");
   else {
-    const slots = Object.entries(value.bindings);
-    for (const [slot, binding] of slots) {
+    for (const [slot, binding] of Object.entries(value.bindings)) {
       const nested = validateSlotBinding(binding);
       if (!nested.ok) issues.push(...nested.issues.map((entry) => ({...entry, path: `$.bindings.${slot}`})));
       else if (binding.slot !== slot) issue(issues, "PERSISTENCE_BINDING_SLOT_KEY", `$.bindings.${slot}`, "key must equal the binding slot");
-      else if (Number.isSafeInteger(value.generation) && binding.generation !== value.generation) issue(issues, "PERSISTENCE_BINDING_GENERATION_MISMATCH", `$.bindings.${slot}.generation`, "must equal the committed generation");
+      // Slots switch independently (ADR 0002 section 3), so a slot keeps the generation it was bound at while the
+      // file records the newest transaction. Only a binding from the future is incoherent.
+      else if (Number.isSafeInteger(value.generation) && binding.generation > value.generation) issue(issues, "PERSISTENCE_BINDING_GENERATION_MISMATCH", `$.bindings.${slot}.generation`, "cannot exceed the committed generation");
     }
   }
   return result(value, issues);

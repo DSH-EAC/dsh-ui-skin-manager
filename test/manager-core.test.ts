@@ -50,8 +50,9 @@ test("state that parses but violates the contract is quarantined as corrupt", as
 test("catalog deduplicates installs and keeps unsigned packages third-party", () => {
   const catalog = new PackageCatalog();
   const item = {manifest: manifest(), versionPath: "/packages/third.party.skin/1.0.0/a", digest: digest("a"), source: "local" as const, origin: "file:///tmp/third.party.skin-1.0.0.zip"};
-  assert.equal(catalog.install(item).refCount, 1);
-  assert.equal(catalog.install(item).refCount, 2);
+  assert.equal(catalog.install(item).refCount, 0, "installing registers an artifact; only durable state holds one (ADR 0002 section 1)");
+  assert.equal(catalog.install(item).refCount, 0, "a repeat install is the same registration, not a second reference");
+  assert.equal(catalog.install({...item, refCount: 2}).refCount, 2, "an explicit hold survives a re-install");
   assert.equal(catalog.get("third.party.skin", "1.0.0")?.official, false);
   assert.equal(catalog.uninstall("third.party.skin", "1.0.0"), 1);
 });
