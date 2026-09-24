@@ -4,6 +4,8 @@ export const MANIFEST_KIND = "SkinPackage" as const;
 export const HOST_PROFILE_ID = "dsh-desktop-eac-ui-skin-profile" as const;
 export const MANIFEST_SCHEMA_ID = "https://dsh-eac.github.io/schemas/ui-skin/v1/skin-package.schema.json" as const;
 
+export const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
+
 export const ERROR_CATEGORIES = [
   "MANIFEST", "COMPATIBILITY", "INTEGRITY", "PATH", "DEPENDENCY",
   "CAPABILITY", "PREPARE", "ACTIVATE", "HEALTH", "TIMEOUT",

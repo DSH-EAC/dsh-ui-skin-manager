@@ -80,6 +80,19 @@ export interface QuarantineRecord {
   timestamp: string;
 }
 
+export interface InstalledPackage {
+  manifest: SkinManifest;
+  versionPath: string;
+  digest: string;
+  source: "local" | "embedded" | "remote";
+  origin: string;
+  archiveDigest?: string | undefined;
+  container?: {id: string; version: string; root: string} | undefined;
+  signature?: {algorithm: string; value: string; signer?: string | undefined} | undefined;
+  refCount?: number | undefined;
+  official?: boolean | undefined;
+}
+
 export interface FaultEvent {
   timestamp: string;
   severity: "warning" | "error" | "fatal";

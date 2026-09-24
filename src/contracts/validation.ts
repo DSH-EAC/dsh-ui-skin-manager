@@ -1,8 +1,8 @@
 import {ERROR_CATEGORIES, HOST_PROFILE_ID, MANIFEST_API_VERSION, MANIFEST_KIND} from "./constants.ts";
 import {isValidRange, isValidVersion, satisfiesVersion} from "./semver.ts";
-import type {BindingGeneration, DisposeReport, FaultEvent, HostProfile, QuarantineRecord, SkinManifest, SlotBinding, SlotContribution, ValidationIssue, ValidationResult} from "./models.ts";
+import type {BindingGeneration, DisposeReport, FaultEvent, HostProfile, InstalledPackage, QuarantineRecord, SkinManifest, SlotBinding, SlotContribution, ValidationIssue, ValidationResult} from "./models.ts";
 
-export {isValidRange, isValidVersion, normalizeRange, parseVersion, satisfiesVersion} from "./semver.ts";
+export {compareVersions, isValidRange, isValidVersion, normalizeRange, parseVersion, satisfiesVersion} from "./semver.ts";
 
 const ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -192,6 +192,29 @@ export function validateBindingGeneration(value: unknown): ValidationResult<Bind
 export function validateSlotBinding(value: unknown): ValidationResult<SlotBinding> {
   const issues: ValidationIssue[] = [];
   if (!record(value) || typeof value.slot !== "string" || value.slot.length === 0 || !record(value.package) || typeof value.package.id !== "string" || !ID.test(value.package.id) || !isValidVersion(value.package.version) || typeof value.package.digest !== "string" || !DIGEST.test(value.package.digest) || typeof value.contribution !== "string" || value.contribution.length === 0 || !Number.isSafeInteger(value.generation) || value.generation < 0 || !["staged", "active", "failed", "inactive"].includes(value.state)) issue(issues, "MANIFEST_SLOT_BINDING", "$", "is not a valid SlotBinding");
+  return result(value, issues);
+}
+
+export function validateInstalledPackage(value: unknown): ValidationResult<InstalledPackage> {
+  const issues: ValidationIssue[] = [];
+  if (!record(value)) {
+    issue(issues, "PERSISTENCE_INSTALL_INDEX", "$", "must be an object");
+    return result(value, issues);
+  }
+  const manifest = validateSkinManifest(value.manifest);
+  if (!manifest.ok) issues.push(...manifest.issues.map((entry) => ({...entry, path: `$.manifest${entry.path.slice(1)}`})));
+  if (typeof value.versionPath !== "string" || value.versionPath.length === 0) issue(issues, "PERSISTENCE_INSTALL_PATH", "$.versionPath", "must be a non-empty path");
+  if (typeof value.digest !== "string" || !DIGEST.test(value.digest)) issue(issues, "PERSISTENCE_INSTALL_DIGEST", "$.digest", "must be a sha256 digest");
+  if (!["local", "embedded", "remote"].includes(value.source)) issue(issues, "PERSISTENCE_INSTALL_SOURCE", "$.source", "must be local, embedded or remote");
+  if (typeof value.origin !== "string" || value.origin.length === 0) issue(issues, "PERSISTENCE_INSTALL_ORIGIN", "$.origin", "must be a non-empty string");
+  if (value.archiveDigest !== undefined && !DIGEST.test(String(value.archiveDigest))) issue(issues, "PERSISTENCE_INSTALL_DIGEST", "$.archiveDigest", "must be a sha256 digest");
+  if (value.signature !== undefined) {
+    if (!record(value.signature) || typeof value.signature.algorithm !== "string" || value.signature.algorithm.length === 0 || typeof value.signature.value !== "string" || value.signature.value.length === 0) {
+      issue(issues, "PERSISTENCE_INSTALL_SIGNATURE", "$.signature", "must declare an algorithm and a value");
+    }
+  }
+  if (value.refCount !== undefined && (!Number.isSafeInteger(value.refCount) || (value.refCount as number) < 0)) issue(issues, "PERSISTENCE_INSTALL_REFCOUNT", "$.refCount", "must be a non-negative integer");
+  if (value.official !== undefined && typeof value.official !== "boolean") issue(issues, "PERSISTENCE_INSTALL_OFFICIAL", "$.official", "must be a boolean");
   return result(value, issues);
 }
 

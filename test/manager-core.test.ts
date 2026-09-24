@@ -9,7 +9,7 @@ import {AtomicJsonStore} from "../src/persistence/atomic-json-store.ts";
 import {BindingStore} from "../src/bindings/binding-store.ts";
 import {resolvePackage} from "../src/resolver/package-resolver.ts";
 import {DiagnosticStore} from "../src/diagnostics/diagnostic-store.ts";
-import type {HostProfile, SkinManifest} from "../src/index.ts";
+import type {HostProfile, InstalledPackage, SkinManifest} from "../src/index.ts";
 
 const digest = (letter: string) => `sha256:${letter.repeat(64)}`;
 const manifest = (id = "third.party.skin", version = "1.0.0"): SkinManifest => ({
@@ -49,20 +49,28 @@ test("state that parses but violates the contract is quarantined as corrupt", as
 
 test("catalog deduplicates installs and keeps unsigned packages third-party", () => {
   const catalog = new PackageCatalog();
-  const item = {manifest: manifest(), versionPath: "/packages/third.party.skin/1.0.0/a", digest: digest("a"), source: "local" as const};
+  const item = {manifest: manifest(), versionPath: "/packages/third.party.skin/1.0.0/a", digest: digest("a"), source: "local" as const, origin: "file:///tmp/third.party.skin-1.0.0.zip"};
   assert.equal(catalog.install(item).refCount, 1);
   assert.equal(catalog.install(item).refCount, 2);
   assert.equal(catalog.get("third.party.skin", "1.0.0")?.official, false);
   assert.equal(catalog.uninstall("third.party.skin", "1.0.0"), 1);
 });
 
-test("resolver resolves dependencies and always exposes system.default fallback", () => {
+test("one coordinate cannot silently point at a different artifact", () => {
+  const catalog = new PackageCatalog();
+  const base = {manifest: manifest(), versionPath: "/packages/third.party.skin/1.0.0/a", source: "local" as const, origin: "file:///tmp/a.zip"};
+  catalog.install({...base, digest: digest("a")});
+  assert.throws(() => catalog.install({...base, digest: digest("b")}), /INTEGRITY_COORDINATE_CONFLICT/);
+});
+
+test("resolver resolves dependencies and always exposes the profile fallback", () => {
   const root = manifest("root.skin");
   root.dependencies = [{id: "dependency.skin", range: "^1.0.0"}];
-  const dependency = {manifest: manifest("dependency.skin"), versionPath: "/packages/dependency.skin/1.0.0/a", digest: digest("b"), source: "local" as const, refCount: 1, official: false};
-  const resolved = resolvePackage(root, [dependency], {profile, managerVersion: "1.0.0", hostVersion: "0.3.0"});
-  assert.deepEqual(resolved.packages.map((item) => item.manifest.metadata.id), ["dependency.skin", "root.skin"]);
-  assert.equal(resolved.fallback.id, "system.default");
+  const item = (id: string): InstalledPackage => ({manifest: manifest(id), versionPath: `/packages/${id}/1.0.0/a`, digest: digest("b"), source: "local", origin: `file:///tmp/${id}-1.0.0.zip`, refCount: 1, official: false});
+  const installed = [item("root.skin"), item("dependency.skin")];
+  const resolved = resolvePackage(root, installed, {profile, managerVersion: "1.0.0", hostVersion: "0.3.0"});
+  assert.deepEqual(resolved.packages.map((entry) => entry.manifest.metadata.id), ["dependency.skin", "root.skin"]);
+  assert.deepEqual(resolved.fallback, profile.fallbackSkin);
 });
 
 test("binding recovery discards pending and preserves committed evidence", async () => {
